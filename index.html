@@ -12,8 +12,7 @@
 import {initializeApp} from "https://www.gstatic.com/firebasejs/11.0.0/firebase-app.js";
 import {getDatabase,ref,set,onValue,push,remove} from "https://www.gstatic.com/firebasejs/11.0.0/firebase-database.js";
 const cfg={apiKey:"AIzaSyAEHUEIHEU5VfHHvYU0aNhSsxRvYaa5ojY",authDomain:"urna-digital-6ec84.firebaseapp.com",databaseURL:"https://urna-digital-6ec84-default-rtdb.firebaseio.com",projectId:"urna-digital-6ec84",storageBucket:"urna-digital-6ec84.firebasestorage.app",messagingSenderId:"100650474766",appId:"1:100650474766:web:69531e65a1170651bd4b5f"};
-const app=initializeApp(cfg);
-const db=getDatabase(app);
+const app=initializeApp(cfg);const db=getDatabase(app);
 window.__db=db;window.__ref=ref;window.__set=set;window.__onValue=onValue;window.__push=push;window.__remove=remove;
 window.__fbReady=true;window.dispatchEvent(new Event("fbReady"));
 </script>
@@ -22,12 +21,14 @@ window.__fbReady=true;window.dispatchEvent(new Event("fbReady"));
 body{font-family:system-ui,-apple-system,sans-serif;background:#f0f4f8;min-height:100vh}
 input,select,textarea,button{font-family:inherit;font-size:14px}
 input:focus,select:focus,textarea:focus{outline:2px solid #1d4ed8;outline-offset:1px}
+@media print{.no-print{display:none!important}.print-only{display:block!important}}
+.print-only{display:none}
 </style>
 </head>
 <body>
-<div id="root"><div style="display:flex;align-items:center;justify-content:center;min-height:100vh;flex-direction:column;gap:12px"><div style="font-size:48px">🗳️</div><p style="color:#6b7280">Carregando sistema...</p></div></div>
+<div id="root"><div style="display:flex;align-items:center;justify-content:center;min-height:100vh;flex-direction:column;gap:12px"><div style="font-size:48px">🗳️</div><p style="color:#6b7280">Carregando...</p></div></div>
 <script type="text/babel">
-const {useState,useRef,useEffect}=React;
+const {useState,useRef,useEffect,useCallback}=React;
 const ADMIN_CPF="00000000000",ADMIN_SENHA="admin123";
 const LISTA_PAD=[
   {unidade:"101",nome:"Carlos Silva",cpf:"11111111111",senha:"1234",inadimplente:false},
@@ -38,6 +39,7 @@ const LISTA_PAD=[
 const dig=v=>v.replace(/\D/g,"").slice(0,11);
 const fmtCPF=v=>{const d=dig(v);if(d.length<=3)return d;if(d.length<=6)return d.slice(0,3)+"."+d.slice(3);if(d.length<=9)return d.slice(0,3)+"."+d.slice(3,6)+"."+d.slice(6);return d.slice(0,3)+"."+d.slice(3,6)+"."+d.slice(6,9)+"-"+d.slice(9);};
 const fmtT=s=>{if(s<=0)return"00:00";return String(Math.floor(s/60)).padStart(2,"0")+":"+String(s%60).padStart(2,"0");};
+const fmtDate=ts=>ts?new Date(ts).toLocaleString("pt-BR"):"—";
 const pct=(n,t)=>t>0?((n/t)*100).toFixed(1):"0.0";
 const dbSet=(p,v)=>window.__db&&window.__set(window.__ref(window.__db,p),v);
 const dbPush=(p,v)=>window.__db&&window.__push(window.__ref(window.__db,p),v);
@@ -96,7 +98,7 @@ function App(){
   const votosObj=useDB("votos",null);
   const vot=useDB("vot",{status:"aguardando",inicioTs:null,fimTs:null,duracaoSeg:600});
 
-  useEffect(()=>{if(!window.__fbReady){const h=()=>setFbOk(true);window.addEventListener("fbReady",h,{once:true});return()=>window.removeEventListener("fbReady",h);}}, []);
+  useEffect(()=>{if(!window.__fbReady){const h=()=>setFbOk(true);window.addEventListener("fbReady",h,{once:true});return()=>window.removeEventListener("fbReady",h);}},[]);
   useEffect(()=>{if(!fbOk||condsRaw!==null)return;dbSet("conds",[{id:1,nome:"Condominio Exemplo",ativo:true}]);},[fbOk,condsRaw]);
   useEffect(()=>{if(!fbOk||listaObj!==null)return;const o={};LISTA_PAD.forEach((m,i)=>o[i]=m);dbSet("lista",o);},[fbOk,listaObj]);
 
@@ -122,18 +124,13 @@ function App(){
     setUser({...m,role:"morador"});setPage("facial");return null;
   };
 
-  const onFotoCapturada=(foto)=>{setFotoVotante(foto);setPage("votar");};
+  const registrar=d=>{dbPush("votos",{...d,foto:fotoVotante||null,ts:new Date().toLocaleTimeString("pt-BR")});setFotoVotante(null);setUser(null);setPage("login");};
 
-  const registrar=d=>{
-    dbPush("votos",{...d,foto:fotoVotante||null,ts:new Date().toLocaleTimeString("pt-BR")});
-    setFotoVotante(null);setUser(null);setPage("login");
-  };
-
-  if(!fbOk)return(<div style={{...S.page,flexDirection:"column",gap:12,textAlign:"center"}}><div style={{fontSize:48}}>🗳️</div><p style={{color:"#6b7280",fontSize:16}}>Conectando...</p></div>);
+  if(!fbOk)return(<div style={{...S.page,flexDirection:"column",gap:12,textAlign:"center"}}><div style={{fontSize:48}}>🗳️</div><p style={{color:"#6b7280"}}>Conectando...</p></div>);
 
   if(page==="login")    return <Login    cond={cond} vot={vot} onLogin={login} onRes={()=>setPage("resultado")}/>;
   if(page==="admin")    return <Admin    conds={conds} enq={enq} lista={lista} votos={votos} vot={vot} cond={cond} onLogout={()=>{setUser(null);setPage("login");}} onRes={()=>setPage("resultado")}/>;
-  if(page==="facial")   return <Facial   user={user} onOk={onFotoCapturada} onCancel={()=>{setUser(null);setPage("login");}}/>;
+  if(page==="facial")   return <Facial   user={user} onOk={foto=>{setFotoVotante(foto);setPage("votar");}} onCancel={()=>{setUser(null);setPage("login");}}/>;
   if(page==="votar")    return <Votar    user={user} enq={enq} cond={cond} lista={lista} votos={votos} vot={vot} onVotar={registrar} onCancel={()=>{setUser(null);setPage("login");}}/>;
   if(page==="resultado")return <Resultado votos={votos} enq={enq} cond={cond} lista={lista} vot={vot} onBack={()=>setPage(user?.role==="admin"?"admin":"login")}/>;
   return null;
@@ -175,7 +172,7 @@ function Login({cond,vot,onLogin,onRes}){
   );
 }
 
-/* ══ FACIAL — com foto salva ══ */
+/* ══ FACIAL ══ */
 function Facial({user,onOk,onCancel}){
   const vRef=useRef();const cRef=useRef();const stRef=useRef(null);
   const[foto,setFoto]=useState(null);const[semCam,setSemCam]=useState(false);
@@ -188,8 +185,8 @@ function Facial({user,onOk,onCancel}){
     <div style={S.page}><div style={{...S.card,width:"100%",maxWidth:420}}>
       <h2 style={{fontWeight:700,textAlign:"center",fontSize:20,color:"#1e3a5f",marginBottom:4}}>Identificacao Facial</h2>
       <p style={{textAlign:"center",color:"#6b7280",fontSize:13,marginBottom:4}}>Ola, <strong>{user.nome}</strong> — Unidade {user.unidade}</p>
-      <p style={{textAlign:"center",color:"#9ca3af",fontSize:12,marginBottom:14}}>Sua foto sera registrada junto ao voto para fins de auditoria</p>
-      {semCam&&<div style={{...S.badge(false),display:"block",textAlign:"center",padding:"8px",marginBottom:12}}>Camera nao disponivel neste dispositivo</div>}
+      <p style={{textAlign:"center",color:"#9ca3af",fontSize:12,marginBottom:14}}>Sua foto sera registrada junto ao voto para auditoria</p>
+      {semCam&&<div style={{...S.badge(false),display:"block",textAlign:"center",padding:"8px",marginBottom:12}}>Camera nao disponivel</div>}
       <div style={{background:"#f3f4f6",borderRadius:10,overflow:"hidden",marginBottom:14,aspectRatio:"4/3",display:"flex",alignItems:"center",justifyContent:"center",position:"relative"}}>
         {!foto?<video ref={vRef} autoPlay playsInline muted style={{width:"100%",height:"100%",objectFit:"cover"}}/>:<img src={foto} alt="foto" style={{width:"100%",height:"100%",objectFit:"cover"}}/>}
         {!foto&&!semCam&&<div style={{position:"absolute",inset:18,border:"2px dashed #3b82f6",borderRadius:10,pointerEvents:"none"}}/>}
@@ -197,13 +194,8 @@ function Facial({user,onOk,onCancel}){
       </div>
       <canvas ref={cRef} style={{display:"none"}}/>
       <div style={{display:"flex",flexDirection:"column",gap:8}}>
-        {!foto?<>
-          {!semCam&&<button onClick={cap} style={S.btn("#1d4ed8")}>📸 Capturar foto</button>}
-          {semCam&&<button onClick={()=>onOk(null)} style={S.btn("#1d4ed8")}>Continuar sem camera</button>}
-        </>:<>
-          <button onClick={()=>onOk(foto)} style={S.btn("#15803d")}>✅ Confirmar e votar</button>
-          <button onClick={()=>setFoto(null)} style={S.btnO}>🔄 Tirar novamente</button>
-        </>}
+        {!foto?<>{!semCam&&<button onClick={cap} style={S.btn("#1d4ed8")}>📸 Capturar foto</button>}{semCam&&<button onClick={()=>onOk(null)} style={S.btn("#1d4ed8")}>Continuar sem camera</button>}</>
+        :<><button onClick={()=>onOk(foto)} style={S.btn("#15803d")}>✅ Confirmar e votar</button><button onClick={()=>setFoto(null)} style={S.btnO}>🔄 Tirar novamente</button></>}
         <button onClick={onCancel} style={{...S.btnO,color:"#dc2626",borderColor:"#fca5a5"}}>Cancelar</button>
       </div>
     </div></div>
@@ -216,8 +208,7 @@ function Votar({user,enq,cond,lista,votos,vot,onVotar,onCancel}){
   useEffect(()=>{if(vot&&vot.status==="encerrada")onCancel();},[vot?.status]);
   const disp=lista.filter(m=>m.unidade!==user.unidade&&!votos.find(v=>v.unidade===m.unidade)&&!m.inadimplente);
   const votar=v=>{if(proc&&!urep){setErr("Selecione a unidade.");return;}setErr("");setConf(v);};
-  const ico={Aprovado:"✅",Reprovado:"❌",Abstencao:"⚪"};
-  const clr={Aprovado:"#15803d",Reprovado:"#b91c1c",Abstencao:"#4b5563"};
+  const ico={Aprovado:"✅",Reprovado:"❌",Abstencao:"⚪"};const clr={Aprovado:"#15803d",Reprovado:"#b91c1c",Abstencao:"#4b5563"};
   if(conf)return(
     <div style={S.page}><div style={{...S.card,width:"100%",maxWidth:340,textAlign:"center"}}>
       <div style={{fontSize:56,marginBottom:8}}>{ico[conf]}</div>
@@ -244,21 +235,14 @@ function Votar({user,enq,cond,lista,votos,vot,onVotar,onCancel}){
         {enq?.descricao&&<p style={{fontSize:13,color:"#6b7280",marginTop:4}}>{enq.descricao}</p>}
       </div>
       <div style={{marginBottom:14}}>
-        <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:14,marginBottom:proc?8:0}}>
-          <input type="checkbox" checked={proc} onChange={e=>setProc(e.target.checked)}/> Sou procurador de outra unidade
-        </label>
-        {proc&&<select style={S.inp} value={urep} onChange={e=>setUrep(e.target.value)}>
-          <option value="">Selecione a unidade...</option>
-          {disp.map(m=><option key={m.unidade} value={m.unidade}>Unidade {m.unidade} — {m.nome}</option>)}
-        </select>}
+        <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:14,marginBottom:proc?8:0}}><input type="checkbox" checked={proc} onChange={e=>setProc(e.target.checked)}/> Sou procurador de outra unidade</label>
+        {proc&&<select style={S.inp} value={urep} onChange={e=>setUrep(e.target.value)}><option value="">Selecione a unidade...</option>{disp.map(m=><option key={m.unidade} value={m.unidade}>Unidade {m.unidade} — {m.nome}</option>)}</select>}
         {err&&<p style={{color:"#dc2626",fontSize:13,marginTop:4}}>{err}</p>}
       </div>
       <p style={{textAlign:"center",fontSize:13,color:"#6b7280",marginBottom:10}}>Selecione seu voto:</p>
       <div style={{display:"flex",gap:8,marginBottom:12}}>
         {["Aprovado","Reprovado","Abstencao"].map(v=>(
-          <button key={v} onClick={()=>votar(v)} style={{flex:1,padding:"16px 4px",border:"none",borderRadius:8,background:clr[v],color:"#fff",fontWeight:700,cursor:"pointer",fontSize:13,lineHeight:1.4}}>
-            {ico[v]}<br/>{v}
-          </button>
+          <button key={v} onClick={()=>votar(v)} style={{flex:1,padding:"16px 4px",border:"none",borderRadius:8,background:clr[v],color:"#fff",fontWeight:700,cursor:"pointer",fontSize:13,lineHeight:1.4}}>{ico[v]}<br/>{v}</button>
         ))}
       </div>
       <button onClick={onCancel} style={{...S.btnO,fontSize:13}}>Cancelar</button>
@@ -269,7 +253,7 @@ function Votar({user,enq,cond,lista,votos,vot,onVotar,onCancel}){
 /* ══ ADMIN ══ */
 function Admin({conds,enq,lista,votos,vot,cond,onLogout,onRes}){
   const[tab,setTab]=useState("dash");
-  const tabs=[["dash","📊 Dashboard"],["enq","📋 Enquete"],["lista","👥 Lista"],["conds","🏢 Condominios"],["votos","🗳️ Votos"]];
+  const tabs=[["dash","📊 Dashboard"],["enq","📋 Enquete"],["lista","👥 Lista"],["conds","🏢 Condominios"],["votos","🗳️ Votos"],["relatorio","📄 Relatorio PDF"]];
   return(
     <div style={{minHeight:"100vh",background:"#f0f4f8"}}>
       <header style={{background:"#1e3a5f",padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
@@ -286,17 +270,19 @@ function Admin({conds,enq,lista,votos,vot,cond,onLogout,onRes}){
       <nav style={{background:"#fff",borderBottom:"1px solid #e5e7eb",display:"flex",overflowX:"auto"}}>
         {tabs.map(([k,l])=>(<button key={k} onClick={()=>setTab(k)} style={{padding:"11px 14px",border:"none",borderBottom:tab===k?"2px solid #1d4ed8":"2px solid transparent",background:"transparent",cursor:"pointer",whiteSpace:"nowrap",fontSize:13,fontWeight:tab===k?700:400,color:tab===k?"#1d4ed8":"#6b7280"}}>{l}</button>))}
       </nav>
-      <div style={{padding:16,maxWidth:860,margin:"0 auto"}}>
-        {tab==="dash"  &&<Dash  cond={cond} lista={lista} votos={votos} enq={enq} vot={vot} onRes={onRes}/>}
-        {tab==="enq"   &&<TabEnq enq={enq} conds={conds} vot={vot}/>}
-        {tab==="lista" &&<TabLista lista={lista}/>}
-        {tab==="conds" &&<TabConds conds={conds}/>}
-        {tab==="votos" &&<TabVotos votos={votos}/>}
+      <div style={{padding:16,maxWidth:900,margin:"0 auto"}}>
+        {tab==="dash"      &&<Dash      cond={cond} lista={lista} votos={votos} enq={enq} vot={vot} onRes={onRes}/>}
+        {tab==="enq"       &&<TabEnq    enq={enq} conds={conds} vot={vot}/>}
+        {tab==="lista"     &&<TabLista  lista={lista}/>}
+        {tab==="conds"     &&<TabConds  conds={conds}/>}
+        {tab==="votos"     &&<TabVotos  votos={votos}/>}
+        {tab==="relatorio" &&<TabRelatorio votos={votos} enq={enq} cond={cond} lista={lista} vot={vot}/>}
       </div>
     </div>
   );
 }
 
+/* ══ DASHBOARD ══ */
 function Dash({cond,lista,votos,enq,vot,onRes}){
   const aptos=lista.filter(m=>!m.inadimplente).length;
   const votaram=new Set(votos.map(v=>v.unidade)).size;
@@ -326,9 +312,7 @@ function Dash({cond,lista,votos,enq,vot,onRes}){
       </div>
       <div style={S.card}>
         <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><p style={{...S.lbl,marginBottom:0}}>Progresso 🔴</p><p style={{fontSize:12,color:"#9ca3af"}}>{votaram}/{aptos}</p></div>
-        <div style={{background:"#e5e7eb",borderRadius:99,height:10,overflow:"hidden"}}>
-          <div style={{width:pct(votaram,aptos)+"%",height:"100%",background:"#1d4ed8",borderRadius:99,transition:"width .5s"}}/>
-        </div>
+        <div style={{background:"#e5e7eb",borderRadius:99,height:10,overflow:"hidden"}}><div style={{width:pct(votaram,aptos)+"%",height:"100%",background:"#1d4ed8",borderRadius:99,transition:"width .5s"}}/></div>
       </div>
     </div>
   );
@@ -342,7 +326,7 @@ function TabEnq({enq,conds,vot}){
     <div style={S.card}>
       <h3 style={{fontWeight:700,marginBottom:14,color:"#1e3a5f"}}>⚙️ Configurar Enquete</h3>
       {lock&&<div style={{background:"#fef9c3",color:"#854d0e",padding:"8px 12px",borderRadius:8,marginBottom:14,fontSize:13}}>⚠️ Votacao em andamento. Encerre para editar.</div>}
-      <div style={{marginBottom:12}}><label style={S.lbl}>Condominio ativo</label>
+      <div style={{marginBottom:12}}><label style={S.lbl}>Condominio</label>
         <select disabled={lock} style={S.inp} value={f.condominioId||""} onChange={e=>setF(p=>({...p,condominioId:+e.target.value}))}>
           {conds.map((c,i)=><option key={c.id||i} value={c.id||i}>{c.nome}</option>)}
         </select>
@@ -355,95 +339,64 @@ function TabEnq({enq,conds,vot}){
   );
 }
 
-/* ══ LISTA — manual + Excel + visualizacao ══ */
 function TabLista({lista}){
-  const[modo,setModo]=useState("ver"); // ver | manual | excel
+  const[modo,setModo]=useState("ver");
   const[form,setForm]=useState({unidade:"",nome:"",cpf:"",senha:"",inadimplente:false});
-  const[editI,setEditI]=useState(null);const[formEdit,setFormEdit]=useState({});
-  const[busca,setBusca]=useState("");
+  const[editI,setEditI]=useState(null);const[formEdit,setFormEdit]=useState({});const[busca,setBusca]=useState("");
   const fRef=useRef();
-
   const adicionar=()=>{
-    if(!form.unidade.trim()||!form.nome.trim()||!form.cpf.trim()||!form.senha.trim()){alert("Preencha todos os campos obrigatorios.");return;}
-    const novo={...form,cpf:dig(form.cpf)};
-    dbSet("lista/"+lista.length,novo);
+    if(!form.unidade.trim()||!form.nome.trim()||!form.cpf.trim()||!form.senha.trim()){alert("Preencha todos os campos.");return;}
+    dbSet("lista/"+lista.length,{...form,cpf:dig(form.cpf)});
     setForm({unidade:"",nome:"",cpf:"",senha:"",inadimplente:false});setModo("ver");
   };
-
   const imp=async e=>{
-    const file=e.target.files[0];if(!file)return;
-    if(!window.XLSX){alert("Aguarde...");return;}
+    const file=e.target.files[0];if(!file)return;if(!window.XLSX){alert("Aguarde...");return;}
     const buf=await file.arrayBuffer();const wb=window.XLSX.read(buf);
     const rows=window.XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:""});
-    const obj={};
-    rows.forEach((r,i)=>{obj[i]={unidade:String(r.unidade||r.Unidade||""),nome:String(r.nome||r.Nome||""),cpf:dig(String(r.cpf||r.CPF||"")),senha:String(r.senha||r.Senha||"1234"),inadimplente:String(r.inadimplente||r.Inadimplente||"").toLowerCase()==="sim"};});
+    const obj={};rows.forEach((r,i)=>{obj[i]={unidade:String(r.unidade||r.Unidade||""),nome:String(r.nome||r.Nome||""),cpf:dig(String(r.cpf||r.CPF||"")),senha:String(r.senha||r.Senha||"1234"),inadimplente:String(r.inadimplente||r.Inadimplente||"").toLowerCase()==="sim"};});
     dbSet("lista",obj);e.target.value="";alert("Lista importada: "+rows.length+" moradores.");setModo("ver");
   };
-
-  const baixarModelo=()=>{
-    if(!window.XLSX)return;
-    const ws=window.XLSX.utils.aoa_to_sheet([["unidade","nome","cpf","senha","inadimplente"],["101","Carlos Silva","11111111111","1234","nao"],["102","Maria Souza","22222222222","1234","sim"]]);
-    const wb=window.XLSX.utils.book_new();window.XLSX.utils.book_append_sheet(wb,ws,"Lista");
-    window.XLSX.writeFile(wb,"modelo_lista_chamada.xlsx");
-  };
-
-  const toggleInad=(i)=>dbSet("lista/"+i,{...lista[i],inadimplente:!lista[i].inadimplente});
-  const salvarEdit=()=>{dbSet("lista/"+editI,formEdit);setEditI(null);};
-  const remover=(i)=>{if(confirm("Remover este morador?"))dbDel("lista/"+i);};
-
+  const baixarModelo=()=>{if(!window.XLSX)return;const ws=window.XLSX.utils.aoa_to_sheet([["unidade","nome","cpf","senha","inadimplente"],["101","Carlos Silva","11111111111","1234","nao"],["102","Maria Souza","22222222222","1234","sim"]]);const wb=window.XLSX.utils.book_new();window.XLSX.utils.book_append_sheet(wb,ws,"Lista");window.XLSX.writeFile(wb,"modelo_lista_chamada.xlsx");};
   const filtrada=lista.filter(m=>!busca||m.nome.toLowerCase().includes(busca.toLowerCase())||m.unidade.includes(busca)||fmtCPF(m.cpf).includes(busca));
-
   return(
     <div style={{display:"flex",flexDirection:"column",gap:12}}>
-      {/* Barra de ações */}
       <div style={S.card}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,flexWrap:"wrap",gap:8}}>
-          <div><h3 style={{fontWeight:700,color:"#1e3a5f"}}>👥 Lista de Chamada</h3><p style={{fontSize:12,color:"#9ca3af",marginTop:2}}>{lista.length} moradores cadastrados</p></div>
+          <div><h3 style={{fontWeight:700,color:"#1e3a5f"}}>👥 Lista de Chamada</h3><p style={{fontSize:12,color:"#9ca3af",marginTop:2}}>{lista.length} moradores</p></div>
           <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-            <button onClick={()=>setModo(modo==="manual"?"ver":"manual")} style={{...S.btn(modo==="manual"?"#15803d":"#1d4ed8"),width:"auto",padding:"7px 12px",fontSize:12}}>➕ Adicionar manual</button>
+            <button onClick={()=>setModo(modo==="manual"?"ver":"manual")} style={{...S.btn(modo==="manual"?"#15803d":"#1d4ed8"),width:"auto",padding:"7px 12px",fontSize:12}}>➕ Adicionar</button>
             <button onClick={()=>fRef.current.click()} style={{...S.btn("#6366f1"),width:"auto",padding:"7px 12px",fontSize:12}}>📂 Importar Excel</button>
-            <button onClick={baixarModelo} style={{...S.btn("#0891b2"),width:"auto",padding:"7px 12px",fontSize:12}}>📥 Baixar modelo</button>
+            <button onClick={baixarModelo} style={{...S.btn("#0891b2"),width:"auto",padding:"7px 12px",fontSize:12}}>📥 Modelo</button>
             <input ref={fRef} type="file" accept=".xlsx,.xls" style={{display:"none"}} onChange={imp}/>
           </div>
         </div>
-
-        {/* Formulario adicionar manual */}
         {modo==="manual"&&(
           <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:10,padding:14,marginBottom:14}}>
-            <h4 style={{fontWeight:700,color:"#15803d",marginBottom:12}}>➕ Adicionar morador manualmente</h4>
+            <h4 style={{fontWeight:700,color:"#15803d",marginBottom:12}}>➕ Adicionar morador</h4>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
-              <div><label style={S.lbl}>Unidade *</label><input style={S.inp} placeholder="Ex: 101" value={form.unidade} onChange={e=>setForm(p=>({...p,unidade:e.target.value}))}/></div>
-              <div><label style={S.lbl}>Senha *</label><input style={S.inp} placeholder="Senha para login" value={form.senha} onChange={e=>setForm(p=>({...p,senha:e.target.value}))}/></div>
+              <div><label style={S.lbl}>Unidade *</label><input style={S.inp} value={form.unidade} onChange={e=>setForm(p=>({...p,unidade:e.target.value}))}/></div>
+              <div><label style={S.lbl}>Senha *</label><input style={S.inp} value={form.senha} onChange={e=>setForm(p=>({...p,senha:e.target.value}))}/></div>
             </div>
-            <div style={{marginBottom:10}}><label style={S.lbl}>Nome completo *</label><input style={S.inp} placeholder="Nome do morador" value={form.nome} onChange={e=>setForm(p=>({...p,nome:e.target.value}))}/></div>
+            <div style={{marginBottom:10}}><label style={S.lbl}>Nome *</label><input style={S.inp} value={form.nome} onChange={e=>setForm(p=>({...p,nome:e.target.value}))}/></div>
             <div style={{marginBottom:10}}><label style={S.lbl}>CPF *</label><input style={S.inp} placeholder="000.000.000-00" value={fmtCPF(form.cpf)} onChange={e=>setForm(p=>({...p,cpf:e.target.value}))}/></div>
-            <label style={{display:"flex",alignItems:"center",gap:8,fontSize:14,marginBottom:12,cursor:"pointer"}}><input type="checkbox" checked={form.inadimplente} onChange={e=>setForm(p=>({...p,inadimplente:e.target.checked}))}/> Inadimplente (bloqueado de votar)</label>
-            <div style={{display:"flex",gap:8}}>
-              <button onClick={adicionar} style={{...S.btn("#15803d"),flex:1}}>✅ Salvar morador</button>
-              <button onClick={()=>setModo("ver")} style={{...S.btnO,flex:1}}>Cancelar</button>
-            </div>
+            <label style={{display:"flex",alignItems:"center",gap:8,fontSize:14,marginBottom:12,cursor:"pointer"}}><input type="checkbox" checked={form.inadimplente} onChange={e=>setForm(p=>({...p,inadimplente:e.target.checked}))}/> Inadimplente</label>
+            <div style={{display:"flex",gap:8}}><button onClick={adicionar} style={{...S.btn("#15803d"),flex:1}}>✅ Salvar</button><button onClick={()=>setModo("ver")} style={{...S.btnO,flex:1}}>Cancelar</button></div>
           </div>
         )}
-
-        {/* Busca */}
         <div style={{marginBottom:12}}><input style={S.inp} placeholder="🔍 Buscar por nome, unidade ou CPF..." value={busca} onChange={e=>setBusca(e.target.value)}/></div>
-
-        {/* Tabela */}
         <div style={{overflowX:"auto"}}>
           <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
-            <thead><tr style={{background:"#f9fafb"}}>
-              {["Unidade","Nome","CPF","Senha","Status",""].map(h=><th key={h} style={{padding:"8px 10px",textAlign:"left",fontWeight:600,fontSize:12,color:"#6b7280",borderBottom:"1px solid #e5e7eb"}}>{h}</th>)}
-            </tr></thead>
+            <thead><tr style={{background:"#f9fafb"}}>{["Unidade","Nome","CPF","Senha","Status",""].map(h=><th key={h} style={{padding:"8px 10px",textAlign:"left",fontWeight:600,fontSize:12,color:"#6b7280",borderBottom:"1px solid #e5e7eb"}}>{h}</th>)}</tr></thead>
             <tbody>{filtrada.map((m,i)=>(
               <tr key={i} style={{borderBottom:"1px solid #f3f4f6"}}>
                 <td style={{padding:"8px 10px",fontWeight:600}}>{m.unidade}</td>
                 <td style={{padding:"8px 10px"}}>{m.nome}</td>
                 <td style={{padding:"8px 10px",color:"#9ca3af",fontSize:12}}>{fmtCPF(m.cpf)}</td>
-                <td style={{padding:"8px 10px",color:"#9ca3af",fontSize:12,fontFamily:"monospace"}}>{m.senha}</td>
-                <td style={{padding:"8px 10px"}}><button onClick={()=>toggleInad(i)} style={{...S.badge(!m.inadimplente),cursor:"pointer",border:"none"}}>{m.inadimplente?"Inadimplente":"Regular"}</button></td>
+                <td style={{padding:"8px 10px",fontFamily:"monospace",color:"#6b7280"}}>{m.senha}</td>
+                <td style={{padding:"8px 10px"}}><button onClick={()=>dbSet("lista/"+i,{...m,inadimplente:!m.inadimplente})} style={{...S.badge(!m.inadimplente),cursor:"pointer",border:"none"}}>{m.inadimplente?"Inadimplente":"Regular"}</button></td>
                 <td style={{padding:"8px 10px",whiteSpace:"nowrap"}}>
                   <button onClick={()=>{setEditI(i);setFormEdit({...m});}} style={{background:"none",border:"none",color:"#1d4ed8",cursor:"pointer",fontSize:12,marginRight:6}}>Editar</button>
-                  <button onClick={()=>remover(i)} style={{background:"none",border:"none",color:"#dc2626",cursor:"pointer",fontSize:12}}>Remover</button>
+                  <button onClick={()=>{if(confirm("Remover?"))dbDel("lista/"+i);}} style={{background:"none",border:"none",color:"#dc2626",cursor:"pointer",fontSize:12}}>Remover</button>
                 </td>
               </tr>
             ))}</tbody>
@@ -451,8 +404,6 @@ function TabLista({lista}){
           {filtrada.length===0&&<p style={{textAlign:"center",color:"#9ca3af",padding:20}}>Nenhum morador encontrado.</p>}
         </div>
       </div>
-
-      {/* Modal edicao */}
       {editI!==null&&(
         <div style={S.card}>
           <h4 style={{fontWeight:700,marginBottom:12,color:"#1e3a5f"}}>✏️ Editar morador</h4>
@@ -463,10 +414,7 @@ function TabLista({lista}){
           <div style={{marginBottom:10}}><label style={S.lbl}>Nome</label><input style={S.inp} value={formEdit.nome||""} onChange={e=>setFormEdit(p=>({...p,nome:e.target.value}))}/></div>
           <div style={{marginBottom:10}}><label style={S.lbl}>CPF</label><input style={S.inp} value={fmtCPF(formEdit.cpf||"")} onChange={e=>setFormEdit(p=>({...p,cpf:dig(e.target.value)}))}/></div>
           <label style={{display:"flex",alignItems:"center",gap:8,fontSize:14,marginBottom:12,cursor:"pointer"}}><input type="checkbox" checked={formEdit.inadimplente||false} onChange={e=>setFormEdit(p=>({...p,inadimplente:e.target.checked}))}/> Inadimplente</label>
-          <div style={{display:"flex",gap:8}}>
-            <button onClick={salvarEdit} style={{...S.btn("#1d4ed8"),flex:1}}>Salvar</button>
-            <button onClick={()=>setEditI(null)} style={{...S.btnO,flex:1}}>Cancelar</button>
-          </div>
+          <div style={{display:"flex",gap:8}}><button onClick={()=>{dbSet("lista/"+editI,formEdit);setEditI(null);}} style={{...S.btn("#1d4ed8"),flex:1}}>Salvar</button><button onClick={()=>setEditI(null)} style={{...S.btnO,flex:1}}>Cancelar</button></div>
         </div>
       )}
     </div>
@@ -475,68 +423,283 @@ function TabLista({lista}){
 
 function TabConds({conds}){
   const[novo,setNovo]=useState("");
-  const ativar=(idx)=>dbSet("conds",conds.map((c,i)=>({...c,ativo:i===idx})));
-  const adicionar=()=>{if(!novo.trim())return;dbSet("conds",[...conds,{id:Date.now(),nome:novo.trim(),ativo:false}]);setNovo("");};
   return(
     <div style={S.card}>
       <h3 style={{fontWeight:700,marginBottom:14,color:"#1e3a5f"}}>🏢 Condominios</h3>
       <div style={{background:"#eff6ff",borderRadius:8,padding:10,marginBottom:14,fontSize:13,color:"#1e40af"}}>💡 O condominio ativo aparece na tela de login dos moradores.</div>
       <div style={{display:"flex",gap:8,marginBottom:14}}>
-        <input style={{...S.inp,flex:1}} placeholder="Nome do condominio..." value={novo} onChange={e=>setNovo(e.target.value)}/>
-        <button onClick={adicionar} style={{...S.btn("#1d4ed8"),width:"auto",padding:"8px 16px"}}>Adicionar</button>
+        <input style={{...S.inp,flex:1}} placeholder="Nome..." value={novo} onChange={e=>setNovo(e.target.value)}/>
+        <button onClick={()=>{if(!novo.trim())return;dbSet("conds",[...conds,{id:Date.now(),nome:novo.trim(),ativo:false}]);setNovo("");}} style={{...S.btn("#1d4ed8"),width:"auto",padding:"8px 16px"}}>Adicionar</button>
       </div>
       {conds.map((c,i)=>(
         <div key={c.id||i} style={{display:"flex",alignItems:"center",justifyContent:"space-between",border:"1px solid #e5e7eb",borderRadius:8,padding:"10px 14px",marginBottom:8,background:c.ativo?"#f0fdf4":"#fff"}}>
-          <div><p style={{fontWeight:600}}>{c.nome}</p>{c.ativo&&<span style={{...S.badge(true),marginTop:2}}>✅ Ativo agora</span>}</div>
-          {!c.ativo&&<button onClick={()=>ativar(i)} style={{...S.btn("#15803d"),width:"auto",padding:"6px 14px",fontSize:13}}>Ativar</button>}
+          <div><p style={{fontWeight:600}}>{c.nome}</p>{c.ativo&&<span style={{...S.badge(true),marginTop:2}}>✅ Ativo</span>}</div>
+          {!c.ativo&&<button onClick={()=>dbSet("conds",conds.map((x,j)=>({...x,ativo:j===i})))} style={{...S.btn("#15803d"),width:"auto",padding:"6px 14px",fontSize:13}}>Ativar</button>}
         </div>
       ))}
     </div>
   );
 }
 
-/* ══ VOTOS com fotos ══ */
 function TabVotos({votos}){
   const[fotoModal,setFotoModal]=useState(null);
-  const editar=(key,val)=>dbSet("votos/"+key+"/voto",val);
-  const remover=(key)=>{if(confirm("Remover este voto?"))dbDel("votos/"+key);};
   return(
     <div style={S.card}>
-      <h3 style={{fontWeight:700,marginBottom:4,color:"#1e3a5f"}}>🗳️ Votos Registrados — Tempo Real 🔴</h3>
+      <h3 style={{fontWeight:700,marginBottom:4,color:"#1e3a5f"}}>🗳️ Votos — Tempo Real 🔴</h3>
       <p style={{fontSize:12,color:"#9ca3af",marginBottom:14}}>Clique na foto para ampliar</p>
-      {votos.length===0&&<p style={{color:"#9ca3af",textAlign:"center",padding:24}}>Nenhum voto registrado ainda.</p>}
-
-      {/* Modal foto ampliada */}
+      {votos.length===0&&<p style={{color:"#9ca3af",textAlign:"center",padding:24}}>Nenhum voto ainda.</p>}
       {fotoModal&&(
         <div onClick={()=>setFotoModal(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.8)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:9999,cursor:"pointer"}}>
           <div onClick={e=>e.stopPropagation()} style={{background:"#fff",borderRadius:12,padding:16,maxWidth:400,width:"90%"}}>
-            <img src={fotoModal.foto} alt="biometria" style={{width:"100%",borderRadius:8,marginBottom:10}}/>
+            <img src={fotoModal.foto} alt="bio" style={{width:"100%",borderRadius:8,marginBottom:10}}/>
             <p style={{fontWeight:600,textAlign:"center"}}>{fotoModal.nome} — Unidade {fotoModal.unidade}</p>
             <p style={{textAlign:"center",color:"#9ca3af",fontSize:13,marginTop:4}}>{fotoModal.voto} · {fotoModal.ts}</p>
             <button onClick={()=>setFotoModal(null)} style={{...S.btnO,marginTop:10}}>Fechar</button>
           </div>
         </div>
       )}
-
       {votos.map(v=>(
         <div key={v._key} style={{border:"1px solid #e5e7eb",borderRadius:8,padding:"10px 14px",marginBottom:8,display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
-          {/* Foto miniatura */}
           <div onClick={()=>v.foto&&setFotoModal(v)} style={{width:52,height:52,borderRadius:8,overflow:"hidden",background:"#f3f4f6",flexShrink:0,cursor:v.foto?"pointer":"default",border:"1px solid #e5e7eb",display:"flex",alignItems:"center",justifyContent:"center"}}>
             {v.foto?<img src={v.foto} alt="bio" style={{width:"100%",height:"100%",objectFit:"cover"}}/>:<span style={{fontSize:22}}>👤</span>}
           </div>
-          <div style={{flex:1,minWidth:0}}>
+          <div style={{flex:1}}>
             <p style={{fontWeight:600,fontSize:14}}>{v.nome} — Unid. {v.unidade}</p>
             {v.procurador&&<p style={{fontSize:12,color:"#1d4ed8"}}>Procurador de {v.unidadeRep}</p>}
-            <p style={{fontSize:12,color:"#9ca3af"}}>{v.ts} {v.foto?"· 📷 Foto registrada":"· Sem foto"}</p>
+            <p style={{fontSize:12,color:"#9ca3af"}}>{v.ts} {v.foto?"· 📷 Com foto":"· Sem foto"}</p>
           </div>
-          <div style={{display:"flex",gap:8,alignItems:"center",flexShrink:0}}>
-            <select value={v.voto} onChange={e=>editar(v._key,e.target.value)} style={{...S.inp,width:"auto",fontSize:13}}>
+          <div style={{display:"flex",gap:8,alignItems:"center"}}>
+            <select value={v.voto} onChange={e=>dbSet("votos/"+v._key+"/voto",e.target.value)} style={{...S.inp,width:"auto",fontSize:13}}>
               <option>Aprovado</option><option>Reprovado</option><option>Abstencao</option>
             </select>
-            <button onClick={()=>remover(v._key)} style={{background:"none",border:"none",color:"#dc2626",cursor:"pointer",fontSize:16}}>✕</button>
+            <button onClick={()=>{if(confirm("Remover?"))dbDel("votos/"+v._key);}} style={{background:"none",border:"none",color:"#dc2626",cursor:"pointer",fontSize:16}}>✕</button>
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+/* ══ RELATORIO PDF ══ */
+function TabRelatorio({votos,enq,cond,lista,vot}){
+  const ap=votos.filter(v=>v.voto==="Aprovado").length;
+  const rp=votos.filter(v=>v.voto==="Reprovado").length;
+  const ab=votos.filter(v=>v.voto==="Abstencao").length;
+  const total=votos.length;
+  const aptos=lista.filter(m=>!m.inadimplente).length;
+  const votaram=new Set(votos.map(v=>v.unidade)).size;
+  const ausentes=aptos-votaram;
+  const ven=ap>rp?"APROVADO":rp>ap?"REPROVADO":"EMPATE";
+  const dur=vot?.inicioTs&&vot?.fimTs?Math.round((vot.fimTs-vot.inicioTs)/1000):null;
+  const hoje=new Date().toLocaleString("pt-BR");
+
+  const gerarPDF=()=>{
+    const w=window.open("","_blank");
+    const rows=votos.map(v=>`
+      <tr>
+        <td style="padding:8px;border:1px solid #ddd;text-align:center">
+          ${v.foto?`<img src="${v.foto}" style="width:60px;height:60px;object-fit:cover;border-radius:6px;display:block;margin:0 auto">`:`<div style="width:60px;height:60px;background:#f3f4f6;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:24px;margin:0 auto">👤</div>`}
+        </td>
+        <td style="padding:8px;border:1px solid #ddd">${v.unidade}</td>
+        <td style="padding:8px;border:1px solid #ddd">${v.nome}</td>
+        <td style="padding:8px;border:1px solid #ddd">${fmtCPF(v.cpf||"")}</td>
+        <td style="padding:8px;border:1px solid #ddd;text-align:center">
+          <span style="padding:3px 10px;border-radius:99px;font-size:12px;font-weight:600;background:${v.voto==="Aprovado"?"#dcfce7":v.voto==="Reprovado"?"#fee2e2":"#f3f4f6"};color:${v.voto==="Aprovado"?"#166534":v.voto==="Reprovado"?"#991b1b":"#374151"}">${v.voto}</span>
+        </td>
+        <td style="padding:8px;border:1px solid #ddd;text-align:center">${v.procurador?"Sim (Unid. "+v.unidadeRep+")":"Nao"}</td>
+        <td style="padding:8px;border:1px solid #ddd;text-align:center">${v.foto?"✅ Sim":"❌ Nao"}</td>
+        <td style="padding:8px;border:1px solid #ddd">${v.ts||"—"}</td>
+      </tr>
+    `).join("");
+
+    w.document.write(`<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8"/>
+<title>Relatorio de Assembleia</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:Arial,sans-serif;padding:30px;color:#111;font-size:13px}
+  h1{font-size:22px;color:#1e3a5f;margin-bottom:4px}
+  h2{font-size:15px;color:#374151;margin:20px 0 8px;border-bottom:2px solid #1d4ed8;padding-bottom:4px}
+  h3{font-size:13px;color:#6b7280;margin-bottom:12px}
+  .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;padding-bottom:16px;border-bottom:3px solid #1e3a5f}
+  .logo{font-size:32px}
+  .badge{display:inline-block;padding:4px 14px;border-radius:99px;font-size:13px;font-weight:700}
+  .verde{background:#dcfce7;color:#166534}
+  .vermelho{background:#fee2e2;color:#991b1b}
+  .cinza{background:#f3f4f6;color:#374151}
+  .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+  .metric{background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:12px;text-align:center}
+  .metric-val{font-size:26px;font-weight:700;color:#1e3a5f}
+  .metric-lbl{font-size:11px;color:#6b7280;margin-top:2px}
+  .bar-wrap{background:#e5e7eb;border-radius:99px;height:16px;overflow:hidden;margin-bottom:4px}
+  .bar{height:100%;border-radius:99px;display:flex;align-items:center;justify-content:flex-end;padding-right:6px}
+  table{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px}
+  th{background:#1e3a5f;color:#fff;padding:10px 8px;text-align:left;font-size:11px}
+  tr:nth-child(even){background:#f9fafb}
+  .resultado-box{border:3px solid ${ven==="APROVADO"?"#166534":ven==="REPROVADO"?"#991b1b":"#374151"};border-radius:12px;padding:16px;text-align:center;margin-bottom:16px;background:${ven==="APROVADO"?"#dcfce7":ven==="REPROVADO"?"#fee2e2":"#f3f4f6"}}
+  .resultado-txt{font-size:30px;font-weight:700;color:${ven==="APROVADO"?"#166534":ven==="REPROVADO"?"#991b1b":"#374151"}}
+  .info-row{display:flex;gap:20px;margin-bottom:6px;font-size:13px}
+  .info-lbl{color:#6b7280;min-width:140px}
+  .info-val{color:#111;font-weight:600}
+  .assinatura{margin-top:40px;border-top:1px solid #ddd;padding-top:20px;display:flex;justify-content:space-around}
+  .assina-item{text-align:center}
+  .assina-linha{border-top:1px solid #111;width:200px;margin:0 auto 6px}
+  @media print{body{padding:15px}.no-print{display:none}}
+</style>
+</head>
+<body>
+<div class="header">
+  <div>
+    <div style="display:flex;align-items:center;gap:12px">
+      <div class="logo">🗳️</div>
+      <div><h1>Relatorio de Assembleia</h1><h3>${cond?.nome||"Condominio"}</h3></div>
+    </div>
+    <div style="margin-top:10px">
+      <div class="info-row"><span class="info-lbl">Data/Hora do relatorio:</span><span class="info-val">${hoje}</span></div>
+      <div class="info-row"><span class="info-lbl">Inicio da votacao:</span><span class="info-val">${fmtDate(vot?.inicioTs)}</span></div>
+      <div class="info-row"><span class="info-lbl">Encerramento:</span><span class="info-val">${fmtDate(vot?.fimTs)}</span></div>
+      <div class="info-row"><span class="info-lbl">Duracao total:</span><span class="info-val">${dur?fmtT(dur):"—"}</span></div>
+    </div>
+  </div>
+  <div style="text-align:right">
+    <span class="badge ${vot?.status==="encerrada"?"verde":"cinza"}">${vot?.status==="encerrada"?"✅ Encerrada":"Em andamento"}</span>
+  </div>
+</div>
+
+<h2>📋 Pauta da Assembleia</h2>
+<div style="background:#eff6ff;border-radius:8px;padding:14px;margin-bottom:16px">
+  <p style="font-size:16px;font-weight:700;color:#1e3a5f;margin-bottom:4px">${enq?.tema||"Nao definida"}</p>
+  ${enq?.descricao?`<p style="color:#374151;margin-top:4px">${enq.descricao}</p>`:""}
+</div>
+
+<h2>🏆 Resultado Final</h2>
+<div class="resultado-box">
+  <p style="font-size:12px;font-weight:700;text-transform:uppercase;margin-bottom:6px;color:${ven==="APROVADO"?"#166534":ven==="REPROVADO"?"#991b1b":"#374151"}">Resultado da Votacao</p>
+  <p class="resultado-txt">${ven==="APROVADO"?"✅":ven==="REPROVADO"?"❌":"⚖️"} ${ven}</p>
+</div>
+
+<h2>📊 Apuracao dos Votos</h2>
+<div class="grid" style="grid-template-columns:repeat(4,1fr)">
+  <div class="metric"><div class="metric-val">${total}</div><div class="metric-lbl">Total de votos</div></div>
+  <div class="metric"><div class="metric-val" style="color:#166534">${ap}</div><div class="metric-lbl">Aprovados (${pct(ap,total)}%)</div></div>
+  <div class="metric"><div class="metric-val" style="color:#991b1b">${rp}</div><div class="metric-lbl">Reprovados (${pct(rp,total)}%)</div></div>
+  <div class="metric"><div class="metric-val" style="color:#374151">${ab}</div><div class="metric-lbl">Abstencoes (${pct(ab,total)}%)</div></div>
+</div>
+
+${total>0?`
+<div style="margin-bottom:16px">
+  <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px"><span style="color:#166534;font-weight:600">✅ Aprovado</span><span>${ap} votos · ${pct(ap,total)}%</span></div>
+  <div class="bar-wrap"><div class="bar" style="width:${pct(ap,total)}%;background:#15803d">${Number(pct(ap,total))>5?"<span style='color:#fff;font-size:11px;font-weight:700'>"+pct(ap,total)+"%</span>":""}</div></div>
+  <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px;margin-top:8px"><span style="color:#991b1b;font-weight:600">❌ Reprovado</span><span>${rp} votos · ${pct(rp,total)}%</span></div>
+  <div class="bar-wrap"><div class="bar" style="width:${pct(rp,total)}%;background:#b91c1c">${Number(pct(rp,total))>5?"<span style='color:#fff;font-size:11px;font-weight:700'>"+pct(rp,total)+"%</span>":""}</div></div>
+  <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px;margin-top:8px"><span style="color:#374151;font-weight:600">⚪ Abstencao</span><span>${ab} votos · ${pct(ab,total)}%</span></div>
+  <div class="bar-wrap"><div class="bar" style="width:${pct(ab,total)}%;background:#6b7280">${Number(pct(ab,total))>5?"<span style='color:#fff;font-size:11px;font-weight:700'>"+pct(ab,total)+"%</span>":""}</div></div>
+</div>
+`:""}
+
+<h2>📈 Quorum e Participacao</h2>
+<div class="grid">
+  <div class="metric"><div class="metric-val">${aptos}</div><div class="metric-lbl">Unidades aptas</div></div>
+  <div class="metric"><div class="metric-val">${votaram}</div><div class="metric-lbl">Participaram</div></div>
+  <div class="metric"><div class="metric-val">${ausentes}</div><div class="metric-lbl">Ausentes</div></div>
+  <div class="metric"><div class="metric-val">${pct(votaram,aptos)}%</div><div class="metric-lbl">Quorum atingido</div></div>
+</div>
+
+<h2>🗳️ Registro Detalhado de Votos com Biometria Facial</h2>
+${votos.length===0?`<p style="color:#9ca3af;text-align:center;padding:20px">Nenhum voto registrado.</p>`:`
+<table>
+  <thead>
+    <tr>
+      <th style="width:80px;text-align:center">Foto (Biometria)</th>
+      <th>Unidade</th>
+      <th>Nome</th>
+      <th>CPF</th>
+      <th style="text-align:center">Voto</th>
+      <th style="text-align:center">Procurador</th>
+      <th style="text-align:center">Biometria</th>
+      <th>Horario</th>
+    </tr>
+  </thead>
+  <tbody>${rows}</tbody>
+</table>
+`}
+
+<div class="assinatura">
+  <div class="assina-item">
+    <div class="assina-linha"></div>
+    <p style="font-size:12px;font-weight:600">Administradora</p>
+    <p style="font-size:11px;color:#6b7280">Responsavel pela assembleia</p>
+  </div>
+  <div class="assina-item">
+    <div class="assina-linha"></div>
+    <p style="font-size:12px;font-weight:600">Sindico(a)</p>
+    <p style="font-size:11px;color:#6b7280">${cond?.nome||""}</p>
+  </div>
+  <div class="assina-item">
+    <div class="assina-linha"></div>
+    <p style="font-size:12px;font-weight:600">Testemunha</p>
+    <p style="font-size:11px;color:#6b7280">Nome: ___________________</p>
+  </div>
+</div>
+
+<div style="margin-top:30px;text-align:center;font-size:11px;color:#9ca3af;border-top:1px solid #e5e7eb;padding-top:12px">
+  Relatorio gerado automaticamente pelo sistema Urna Digital · ${hoje}
+</div>
+
+<div class="no-print" style="position:fixed;bottom:20px;right:20px;display:flex;gap:10px">
+  <button onclick="window.print()" style="background:#1d4ed8;color:#fff;border:none;padding:12px 20px;border-radius:8px;font-size:14px;cursor:pointer;font-weight:600;box-shadow:0 4px 12px rgba(0,0,0,.2)">🖨️ Imprimir / Salvar PDF</button>
+  <button onclick="window.close()" style="background:#6b7280;color:#fff;border:none;padding:12px 20px;border-radius:8px;font-size:14px;cursor:pointer;font-weight:600">✕ Fechar</button>
+</div>
+</body>
+</html>`);
+    w.document.close();
+    setTimeout(()=>w.print(),1500);
+  };
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:14}}>
+      <div style={S.card}>
+        <h3 style={{fontWeight:700,marginBottom:8,color:"#1e3a5f"}}>📄 Relatorio Completo da Assembleia</h3>
+        <p style={{fontSize:13,color:"#6b7280",marginBottom:16}}>Gere um relatorio completo em PDF com todos os dados da votacao, biometria facial, resultados e espaco para assinaturas.</p>
+
+        {vot?.status!=="encerrada"&&(
+          <div style={{background:"#fef9c3",border:"1px solid #fde68a",borderRadius:8,padding:"10px 14px",marginBottom:14,fontSize:13,color:"#854d0e"}}>
+            ⚠️ Recomendamos gerar o relatorio apos encerrar a votacao para incluir todos os dados finais.
+          </div>
+        )}
+
+        <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10,marginBottom:16}}>
+          {[["Condominio",cond?.nome||"—"],["Pauta",enq?.tema||"—"],["Total de votos",total],["Resultado",ven],["Quorum",pct(votaram,aptos)+"%"],["Com biometria",votos.filter(v=>v.foto).length+" de "+total]].map(([l,v])=>(
+            <div key={l} style={{background:"#f9fafb",borderRadius:8,padding:"10px 12px",border:"1px solid #e5e7eb"}}>
+              <p style={{fontSize:11,color:"#9ca3af",marginBottom:2}}>{l}</p>
+              <p style={{fontWeight:600,color:"#1e3a5f",fontSize:14}}>{v}</p>
+            </div>
+          ))}
+        </div>
+
+        <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:10,padding:14,marginBottom:14}}>
+          <p style={{fontWeight:700,color:"#15803d",marginBottom:8,fontSize:14}}>✅ O relatorio incluira:</p>
+          <ul style={{paddingLeft:18,fontSize:13,color:"#374151",display:"flex",flexDirection:"column",gap:4}}>
+            <li>Dados da assembleia (condominio, pauta, data/hora)</li>
+            <li>Resultado final (APROVADO / REPROVADO / EMPATE)</li>
+            <li>Grafico de barras com percentuais de cada opcao</li>
+            <li>Quorum e participacao detalhados</li>
+            <li><strong>Fotos da biometria facial</strong> de cada votante</li>
+            <li>Tabela completa: nome, CPF, unidade, voto, horario</li>
+            <li>Identificacao de procuradores</li>
+            <li>Espaco para assinaturas (administradora, sindico, testemunha)</li>
+          </ul>
+        </div>
+
+        <button onClick={gerarPDF} style={{...S.btn("#1d4ed8"),fontSize:16,padding:"14px"}}>
+          📄 Gerar e Baixar Relatorio PDF
+        </button>
+        <p style={{textAlign:"center",fontSize:12,color:"#9ca3af",marginTop:8}}>
+          Abre uma nova aba com o relatorio. Use Ctrl+P (ou Cmd+P) para salvar como PDF.
+        </p>
+      </div>
     </div>
   );
 }
@@ -560,7 +723,7 @@ function Resultado({votos,enq,cond,lista,vot,onBack}){
           {dur&&<p style={{fontSize:12,color:"#9ca3af",marginTop:4}}>Duracao: {fmtT(dur)}</p>}
         </div>
         <div style={{background:vBg,border:"1px solid "+vTx,borderRadius:14,padding:"20px 16px",textAlign:"center"}}>
-          <p style={{fontSize:12,fontWeight:700,color:vTx,textTransform:"uppercase",marginBottom:6}}>Resultado Final</p>
+          <p style={{fontSize:12,fontWeight:700,color:vTx,textTransform:"uppercase",marginBottom:6}}>Resultado</p>
           <p style={{fontSize:38,fontWeight:700,color:vTx}}>{ven==="APROVADO"?"✅":ven==="REPROVADO"?"❌":"⚖️"} {ven}</p>
         </div>
         <div style={S.card}>
@@ -592,7 +755,7 @@ function Resultado({votos,enq,cond,lista,vot,onBack}){
             {votos.map((v,i)=>(
               <div key={v._key||i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderTop:i>0?"1px solid #f3f4f6":"none",gap:10}}>
                 <div style={{display:"flex",alignItems:"center",gap:10}}>
-                  {v.foto?<img src={v.foto} alt="bio" style={{width:36,height:36,borderRadius:6,objectFit:"cover",border:"1px solid #e5e7eb"}}/>:<div style={{width:36,height:36,borderRadius:6,background:"#f3f4f6",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>👤</div>}
+                  {v.foto?<img src={v.foto} alt="bio" style={{width:36,height:36,borderRadius:6,objectFit:"cover",border:"1px solid #e5e7eb"}}/>:<div style={{width:36,height:36,borderRadius:6,background:"#f3f4f6",display:"flex",alignItems:"center",justifyContent:  "center",fontSize:18}}>👤</div>}
                   <div><p style={{fontWeight:600,fontSize:14}}>Unid. {v.unidade} — {v.nome}</p>{v.procurador&&<p style={{fontSize:12,color:"#1d4ed8"}}>Procurador de {v.unidadeRep}</p>}<p style={{fontSize:11,color:"#9ca3af"}}>{v.ts}</p></div>
                 </div>
                 <span style={S.badge(v.voto==="Aprovado")}>{v.voto}</span>
