@@ -3,96 +3,273 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Urna Digital</title>
+<title>Urna Digital — Assembleia</title>
+<meta property="og:title" content="Urna Digital — Votacao Online"/>
+<meta property="og:description" content="Acesse para participar da votacao da sua assembleia"/>
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script type="module">
+import {initializeApp} from "https://www.gstatic.com/firebasejs/11.0.0/firebase-app.js";
+import {getDatabase,ref,set,onValue,push,remove,update,get} from "https://www.gstatic.com/firebasejs/11.0.0/firebase-database.js";
+const cfg={
+  apiKey:"AIzaSyAEHUEIHEU5VfHHvYU0aNhSsxRvYaa5ojY",
+  authDomain:"urna-digital-6ec84.firebaseapp.com",
+  databaseURL:"https://urna-digital-6ec84-default-rtdb.firebaseio.com",
+  projectId:"urna-digital-6ec84",
+  storageBucket:"urna-digital-6ec84.firebasestorage.app",
+  messagingSenderId:"100650474766",
+  appId:"1:100650474766:web:69531e65a1170651bd4b5f"
+};
+const app=initializeApp(cfg);
+const db=getDatabase(app);
+window.__db=db;
+window.__ref=ref;
+window.__set=set;
+window.__onValue=onValue;
+window.__push=push;
+window.__remove=remove;
+window.__update=update;
+window.__get=get;
+window.__fbReady=true;
+window.dispatchEvent(new Event("fbReady"));
+</script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:system-ui,-apple-system,sans-serif;background:#f0f4f8;min-height:100vh}
 input,select,textarea,button{font-family:inherit;font-size:14px}
-input:focus,select:focus,textarea:focus{outline:2px solid #185FA5;outline-offset:1px}
+input:focus,select:focus,textarea:focus{outline:2px solid #1d4ed8;outline-offset:1px}
 </style>
 </head>
 <body>
-<div id="root"></div>
+<div id="root"><div style="display:flex;align-items:center;justify-content:center;min-height:100vh;flex-direction:column;gap:12px"><div style="font-size:48px">🗳️</div><p style="color:#6b7280;font-size:16px">Carregando sistema...</p></div></div>
 <script type="text/babel">
 const {useState,useRef,useEffect}=React;
-const ADMIN={cpf:"00000000000",senha:"admin123",nome:"Administradora",role:"admin"};
-const INIT_CONDS=[{id:1,nome:"Residencial das Flores",ativo:false},{id:2,nome:"Edificio Central Park",ativo:true}];
-const INIT_ENQ={tema:"Aprovacao do fundo de reserva 2025",descricao:"Votacao para aprovacao do aumento do fundo de reserva em R$ 50,00 por unidade.",condominioId:2,duracaoMin:10};
-const INIT_LISTA=[
+
+/* ── ADMIN FIXO ── */
+const ADMIN_CPF="00000000000";
+const ADMIN_SENHA="admin123";
+
+/* ── LISTA PADRAO (so usada se nao houver no Firebase) ── */
+const LISTA_PADRAO=[
   {unidade:"101",nome:"Carlos Silva",cpf:"11111111111",senha:"1234",inadimplente:false},
   {unidade:"102",nome:"Maria Souza",cpf:"22222222222",senha:"1234",inadimplente:true},
   {unidade:"201",nome:"Joao Pereira",cpf:"33333333333",senha:"1234",inadimplente:false},
   {unidade:"202",nome:"Ana Costa",cpf:"44444444444",senha:"1234",inadimplente:false},
   {unidade:"301",nome:"Pedro Lima",cpf:"55555555555",senha:"1234",inadimplente:false},
 ];
-const INIT_VOT={status:"aguardando",inicioTs:null,fimTs:null,duracaoSeg:600};
-const digits=v=>v.replace(/\D/g,"").slice(0,11);
-const fmtCPF=v=>{const d=digits(v);if(d.length<=3)return d;if(d.length<=6)return d.slice(0,3)+"."+d.slice(3);if(d.length<=9)return d.slice(0,3)+"."+d.slice(3,6)+"."+d.slice(6);return d.slice(0,3)+"."+d.slice(3,6)+"."+d.slice(6,9)+"-"+d.slice(9);};
-const fmtTime=s=>{if(s<=0)return"00:00";return String(Math.floor(s/60)).padStart(2,"0")+":"+String(s%60).padStart(2,"0");};
+
+/* ── HELPERS ── */
+const dig=v=>v.replace(/\D/g,"").slice(0,11);
+const fmtCPF=v=>{const d=dig(v);if(d.length<=3)return d;if(d.length<=6)return d.slice(0,3)+"."+d.slice(3);if(d.length<=9)return d.slice(0,3)+"."+d.slice(3,6)+"."+d.slice(6);return d.slice(0,3)+"."+d.slice(3,6)+"."+d.slice(6,9)+"-"+d.slice(9);};
+const fmtT=s=>{if(s<=0)return"00:00";return String(Math.floor(s/60)).padStart(2,"0")+":"+String(s%60).padStart(2,"0");};
 const pct=(n,t)=>t>0?((n/t)*100).toFixed(1):"0.0";
+const dbSet=(p,v)=>window.__db&&window.__set(window.__ref(window.__db,p),v);
+const dbPush=(p,v)=>window.__db&&window.__push(window.__ref(window.__db,p),v);
+const dbRemove=(p)=>window.__db&&window.__remove(window.__ref(window.__db,p));
+
+/* ── ESTILOS ── */
 const S={
   page:{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",padding:16,background:"#EFF6FF"},
   card:{background:"#fff",border:"1px solid #dde3ee",borderRadius:14,padding:"1.25rem"},
-  inp:{width:"100%",padding:"9px 12px",border:"1px solid #d1d5db",borderRadius:8,background:"#fff",color:"#1a1a2e",fontSize:14},
+  inp:{width:"100%",padding:"9px 12px",border:"1px solid #d1d5db",borderRadius:8,background:"#fff",color:"#111",fontSize:14},
   btn:(bg,c="#fff")=>({background:bg,color:c,border:"none",borderRadius:8,padding:"10px 16px",fontWeight:600,cursor:"pointer",fontSize:14,width:"100%"}),
   btnO:{background:"transparent",border:"1px solid #d1d5db",borderRadius:8,padding:"10px 16px",fontWeight:500,cursor:"pointer",fontSize:14,color:"#374151",width:"100%"},
   lbl:{fontSize:13,color:"#6b7280",display:"block",marginBottom:4},
   badge:ok=>({display:"inline-block",padding:"2px 10px",borderRadius:99,fontSize:12,fontWeight:600,background:ok?"#dcfce7":"#fee2e2",color:ok?"#166534":"#991b1b"}),
 };
+
+/* ── HOOK FIREBASE ── */
+function useDB(path,def){
+  const[v,setV]=useState(def);
+  useEffect(()=>{
+    const sub=()=>{
+      const r=window.__ref(window.__db,path);
+      return window.__onValue(r,snap=>setV(snap.val()??def));
+    };
+    if(window.__fbReady)return sub();
+    const h=()=>sub();
+    window.addEventListener("fbReady",h,{once:true});
+    return()=>window.removeEventListener("fbReady",h);
+  },[path]);
+  return v;
+}
+
+/* ── CRONOMETRO ── */
 function Crono({vot,big}){
   const[rest,setRest]=useState(0);
   useEffect(()=>{
-    if(vot.status!=="aberta"){setRest(0);return;}
-    const calc=()=>setRest(Math.max(0,vot.duracaoSeg-Math.floor((Date.now()-vot.inicioTs)/1000)));
-    calc();const t=setInterval(calc,500);return()=>clearInterval(t);
-  },[vot.status,vot.inicioTs,vot.duracaoSeg]);
+    if(!vot||vot.status!=="aberta"){setRest(0);return;}
+    const c=()=>setRest(Math.max(0,vot.duracaoSeg-Math.floor((Date.now()-vot.inicioTs)/1000)));
+    c();const t=setInterval(c,500);return()=>clearInterval(t);
+  },[vot?.status,vot?.inicioTs,vot?.duracaoSeg]);
   const cor=rest>60?"#16a34a":rest>30?"#d97706":"#dc2626";
-  if(vot.status==="aguardando")return <span style={{color:"#d97706",fontWeight:600,fontSize:big?26:13}}>{big?"⏳ Aguardando inicio":""}</span>;
-  if(vot.status==="encerrada") return <span style={{color:"#dc2626",fontWeight:600,fontSize:big?26:13}}>{big?"🔒 Encerrada":""}</span>;
+  if(!vot||vot.status==="aguardando")return <span style={{color:"#d97706",fontWeight:600,fontSize:big?22:13}}>{big?"⏳ Aguardando inicio da votacao":""}</span>;
+  if(vot.status==="encerrada")return <span style={{color:"#dc2626",fontWeight:600,fontSize:big?22:13}}>{big?"🔒 Votacao encerrada":""}</span>;
   if(big)return(
     <div style={{textAlign:"center"}}>
-      <div style={{fontSize:50,fontWeight:700,color:cor,fontVariantNumeric:"tabular-nums"}}>{fmtTime(rest)}</div>
-      <div style={{background:"#e5e7eb",borderRadius:99,height:8,margin:"8px 0 2px",overflow:"hidden"}}>
+      <div style={{fontSize:48,fontWeight:700,color:cor,fontVariantNumeric:"tabular-nums"}}>{fmtT(rest)}</div>
+      <div style={{background:"#e5e7eb",borderRadius:99,height:8,margin:"8px 0 4px",overflow:"hidden"}}>
         <div style={{width:vot.duracaoSeg>0?(rest/vot.duracaoSeg)*100+"%":"0%",height:"100%",background:cor,transition:"width .5s",borderRadius:99}}/>
       </div>
       <span style={{fontSize:12,color:"#9ca3af"}}>tempo restante</span>
     </div>
   );
-  return <span style={{color:cor,fontWeight:700,fontSize:15,fontVariantNumeric:"tabular-nums"}}>⏱ {fmtTime(rest)}</span>;
+  return <span style={{color:cor,fontWeight:700,fontSize:14,fontVariantNumeric:"tabular-nums"}}>⏱ {fmtT(rest)}</span>;
 }
+
+/* ══════════ APP ROOT ══════════ */
+function App(){
+  const[user,setUser]=useState(null);
+  const[page,setPage]=useState("login");
+  const[fbOk,setFbOk]=useState(!!window.__fbReady);
+
+  /* dados em tempo real */
+  const condsRaw = useDB("conds", null);
+  const enq      = useDB("enq",   {tema:"Configure a pauta no painel admin",descricao:"",condominioId:1,duracaoMin:10});
+  const listaObj = useDB("lista", null);
+  const votosObj = useDB("votos", null);
+  const vot      = useDB("vot",   {status:"aguardando",inicioTs:null,fimTs:null,duracaoSeg:600});
+
+  useEffect(()=>{
+    if(!window.__fbReady){const h=()=>setFbOk(true);window.addEventListener("fbReady",h,{once:true});return()=>window.removeEventListener("fbReady",h);}
+  },[]);
+
+  /* inicializa dados padrao no Firebase se ainda nao existirem */
+  useEffect(()=>{
+    if(!fbOk||condsRaw!==null)return;
+    dbSet("conds",[{id:1,nome:"Condominio Exemplo",ativo:true}]);
+  },[fbOk,condsRaw]);
+  useEffect(()=>{
+    if(!fbOk||listaObj!==null)return;
+    const obj={};LISTA_PADRAO.forEach((m,i)=>obj[i]=m);
+    dbSet("lista",obj);
+  },[fbOk,listaObj]);
+  useEffect(()=>{
+    if(!fbOk||vot!==null)return;
+    dbSet("vot",{status:"aguardando",inicioTs:null,fimTs:null,duracaoSeg:600});
+  },[fbOk]);
+
+  const conds = Array.isArray(condsRaw)?condsRaw:(condsRaw?Object.values(condsRaw):[]);
+  const lista = listaObj?Object.values(listaObj):LISTA_PADRAO;
+  const votos = votosObj?Object.entries(votosObj).map(([k,v])=>({...v,_key:k})):[];
+  const cond  = conds.find(c=>c.ativo);
+
+  /* encerramento automatico */
+  useEffect(()=>{
+    if(!vot||vot.status!=="aberta")return;
+    const t=setInterval(()=>{
+      if(Math.floor((Date.now()-vot.inicioTs)/1000)>=vot.duracaoSeg)
+        dbSet("vot",{...vot,status:"encerrada",fimTs:Date.now()});
+    },500);
+    return()=>clearInterval(t);
+  },[vot?.status]);
+
+  const login=(cpf,senha)=>{
+    /* ADMIN */
+    if(cpf===ADMIN_CPF&&senha===ADMIN_SENHA){setUser({cpf,nome:"Administradora",role:"admin"});setPage("admin");return null;}
+    /* MORADOR */
+    if(!vot||vot.status==="aguardando")return"A votacao ainda nao foi iniciada pelo administrador.";
+    if(vot.status==="encerrada")return"A votacao ja foi encerrada.";
+    const m=lista.find(x=>x.cpf===cpf&&x.senha===senha);
+    if(!m)return"CPF ou senha invalidos. Verifique com a administracao.";
+    if(m.inadimplente)return"Votacao bloqueada: unidade com pendencias financeiras.";
+    if(votos.find(v=>v.unidade===m.unidade&&!v.procurador))return"Sua unidade ja registrou um voto nesta sessao.";
+    setUser({...m,role:"morador"});setPage("facial");return null;
+  };
+
+  const registrar=d=>{
+    dbPush("votos",{...d,ts:new Date().toLocaleTimeString("pt-BR")});
+    setUser(null);setPage("login");
+  };
+
+  if(!fbOk)return(
+    <div style={{...S.page,flexDirection:"column",gap:12,textAlign:"center"}}>
+      <div style={{fontSize:48}}>🗳️</div>
+      <p style={{color:"#6b7280",fontSize:16}}>Conectando ao sistema...</p>
+      <p style={{color:"#9ca3af",fontSize:13}}>Aguarde um momento</p>
+    </div>
+  );
+
+  /* ROTEAMENTO */
+  if(page==="login")    return <Login    cond={cond} vot={vot} onLogin={login} onRes={()=>setPage("resultado")}/>;
+  if(page==="admin")    return <Admin    conds={conds} enq={enq} lista={lista} votos={votos} vot={vot} cond={cond} onLogout={()=>{setUser(null);setPage("login");}} onRes={()=>setPage("resultado")}/>;
+  if(page==="facial")   return <Facial   user={user} onOk={()=>setPage("votar")} onCancel={()=>{setUser(null);setPage("login");}}/>;
+  if(page==="votar")    return <Votar    user={user} enq={enq} cond={cond} lista={lista} votos={votos} vot={vot} onVotar={registrar} onCancel={()=>{setUser(null);setPage("login");}}/>;
+  if(page==="resultado")return <Resultado votos={votos} enq={enq} cond={cond} lista={lista} vot={vot} onBack={()=>setPage(user?.role==="admin"?"admin":"login")}/>;
+  return null;
+}
+
+/* ══════════ LOGIN ══════════ */
 function Login({cond,vot,onLogin,onRes}){
-  const[cpf,setCpf]=useState("");const[pw,setPw]=useState("");const[err,setErr]=useState("");
-  const go=()=>{const e=onLogin(digits(cpf),pw);if(e)setErr(e);};
-  const stC=vot.status==="aberta"?"#16a34a":vot.status==="encerrada"?"#dc2626":"#d97706";
-  const stL=vot.status==="aberta"?"Aberta":vot.status==="encerrada"?"Encerrada":"Aguardando";
+  const[cpf,setCpf]=useState("");const[pw,setPw]=useState("");const[err,setErr]=useState("");const[role,setRole]=useState("morador");
+  const go=()=>{const e=onLogin(dig(cpf),pw);if(e)setErr(e);};
+  const stC=!vot||vot.status==="aguardando"?"#d97706":vot.status==="encerrada"?"#dc2626":"#16a34a";
+  const stL=!vot||vot.status==="aguardando"?"Aguardando":vot.status==="encerrada"?"Encerrada":"Aberta";
   return(
     <div style={S.page}>
       <div style={{...S.card,width:"100%",maxWidth:400}}>
         <div style={{textAlign:"center",marginBottom:20}}>
           <div style={{fontSize:44,marginBottom:4}}>🗳️</div>
-          <h2 style={{fontWeight:700,fontSize:22,color:"#1e3a5f"}}>Urna Digital</h2>
-          {cond&&<p style={{fontSize:13,color:"#6b7280",marginTop:2}}>{cond.nome}</p>}
-          <p style={{fontSize:13,fontWeight:600,color:stC,marginTop:6}}>● Votacao: {stL}</p>
+          <h1 style={{fontWeight:700,fontSize:22,color:"#1e3a5f"}}>Urna Digital</h1>
+          {cond&&<p style={{fontSize:14,color:"#6b7280",marginTop:4,fontWeight:500}}>{cond.nome}</p>}
+          <div style={{display:"inline-flex",alignItems:"center",gap:6,marginTop:8,background:"#f9fafb",padding:"4px 12px",borderRadius:99,border:"1px solid #e5e7eb"}}>
+            <span style={{width:8,height:8,borderRadius:"50%",background:stC,display:"inline-block"}}></span>
+            <span style={{fontSize:13,fontWeight:600,color:stC}}>Votacao: {stL}</span>
+          </div>
         </div>
-        {vot.status==="aberta"&&<div style={{background:"#f0f9ff",borderRadius:8,padding:12,marginBottom:14}}><Crono vot={vot} big/></div>}
-        {vot.status==="encerrada"&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:8,padding:12,marginBottom:14,textAlign:"center"}}>
-          <p style={{color:"#991b1b",fontWeight:600,fontSize:14}}>🔒 Votacao encerrada</p>
-          <button onClick={onRes} style={{background:"none",border:"none",color:"#1d4ed8",cursor:"pointer",fontSize:13,marginTop:4}}>Ver resultado final →</button>
-        </div>}
+
+        {vot&&vot.status==="aberta"&&(
+          <div style={{background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:10,padding:14,marginBottom:14}}>
+            <Crono vot={vot} big/>
+          </div>
+        )}
+        {vot&&vot.status==="encerrada"&&(
+          <div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:10,padding:12,marginBottom:14,textAlign:"center"}}>
+            <p style={{color:"#991b1b",fontWeight:600,fontSize:14}}>🔒 Votacao encerrada</p>
+            <button onClick={onRes} style={{background:"none",border:"none",color:"#1d4ed8",cursor:"pointer",fontSize:13,marginTop:4}}>Ver resultado →</button>
+          </div>
+        )}
+
+        {/* Selector morador / admin */}
+        <div style={{display:"flex",gap:8,marginBottom:16}}>
+          <button onClick={()=>setRole("morador")} style={{flex:1,padding:"8px",borderRadius:8,border:role==="morador"?"2px solid #1d4ed8":"1px solid #d1d5db",background:role==="morador"?"#eff6ff":"#fff",color:role==="morador"?"#1d4ed8":"#6b7280",fontWeight:600,cursor:"pointer",fontSize:13}}>
+            👤 Morador
+          </button>
+          <button onClick={()=>setRole("admin")} style={{flex:1,padding:"8px",borderRadius:8,border:role==="admin"?"2px solid #1e3a5f":"1px solid #d1d5db",background:role==="admin"?"#1e3a5f":"#fff",color:role==="admin"?"#fff":"#6b7280",fontWeight:600,cursor:"pointer",fontSize:13}}>
+            🔐 Administrador
+          </button>
+        </div>
+
         {err&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:8,padding:"10px 12px",marginBottom:12,fontSize:13,color:"#991b1b"}}>{err}</div>}
-        <div style={{marginBottom:10}}><label style={S.lbl}>CPF</label><input style={S.inp} placeholder="000.000.000-00" value={fmtCPF(cpf)} onChange={e=>setCpf(e.target.value)}/></div>
-        <div style={{marginBottom:14}}><label style={S.lbl}>Senha</label><input type="password" style={S.inp} placeholder="Digite sua senha" value={pw} onChange={e=>setPw(e.target.value)} onKeyDown={e=>e.key==="Enter"&&go()}/></div>
-        <button onClick={go} style={S.btn("#1d4ed8")}>Entrar</button>
-        <button onClick={onRes} style={{...S.btnO,marginTop:8,fontSize:13}}>Ver resultado publico</button>
-        <p style={{textAlign:"center",fontSize:11,color:"#9ca3af",marginTop:10}}>Admin: 000.000.000-00 | Senha: admin123</p>
+
+        <div style={{marginBottom:10}}>
+          <label style={S.lbl}>{role==="morador"?"CPF":"CPF do administrador"}</label>
+          <input style={S.inp} placeholder="000.000.000-00" value={fmtCPF(cpf)} onChange={e=>setCpf(e.target.value)}/>
+        </div>
+        <div style={{marginBottom:16}}>
+          <label style={S.lbl}>Senha</label>
+          <input type="password" style={S.inp} placeholder={role==="morador"?"Senha enviada pela administracao":"Senha do administrador"} value={pw} onChange={e=>setPw(e.target.value)} onKeyDown={e=>e.key==="Enter"&&go()}/>
+        </div>
+
+        <button onClick={go} style={S.btn(role==="admin"?"#1e3a5f":"#1d4ed8")}>
+          {role==="admin"?"🔐 Entrar como Administrador":"🗳️ Entrar para Votar"}
+        </button>
+        <button onClick={onRes} style={{...S.btnO,marginTop:8,fontSize:13}}>📊 Ver resultado publico</button>
+
+        {role==="morador"&&(
+          <div style={{marginTop:14,background:"#f0f9ff",borderRadius:8,padding:10,fontSize:12,color:"#0369a1"}}>
+            <strong>Como votar?</strong><br/>
+            Digite seu CPF e a senha que a administracao enviou para voce. Caso nao tenha recebido, entre em contato com a administracao.
+          </div>
+        )}
       </div>
     </div>
   );
 }
+
+/* ══════════ FACIAL ══════════ */
 function Facial({user,onOk,onCancel}){
   const vRef=useRef();const cRef=useRef();const stRef=useRef(null);
   const[foto,setFoto]=useState(null);const[semCam,setSemCam]=useState(false);
@@ -102,42 +279,43 @@ function Facial({user,onOk,onCancel}){
   },[]);
   const cap=()=>{const v=vRef.current,c=cRef.current;if(!v||!c)return;c.width=v.videoWidth||320;c.height=v.videoHeight||240;c.getContext("2d").drawImage(v,0,0);setFoto(c.toDataURL("image/jpeg",.8));stRef.current?.getTracks().forEach(t=>t.stop());};
   return(
-    <div style={S.page}>
-      <div style={{...S.card,width:"100%",maxWidth:420}}>
-        <h2 style={{fontWeight:700,textAlign:"center",fontSize:20,color:"#1e3a5f",marginBottom:4}}>Identificacao Facial</h2>
-        <p style={{textAlign:"center",color:"#6b7280",fontSize:13,marginBottom:14}}>Ola, <strong>{user.nome}</strong> — Unidade {user.unidade}</p>
-        {semCam&&<div style={{...S.badge(false),display:"block",textAlign:"center",padding:"8px",marginBottom:12}}>Camera nao disponivel</div>}
-        <div style={{background:"#f3f4f6",borderRadius:10,overflow:"hidden",marginBottom:14,aspectRatio:"4/3",display:"flex",alignItems:"center",justifyContent:"center",position:"relative"}}>
-          {!foto?<video ref={vRef} autoPlay playsInline muted style={{width:"100%",height:"100%",objectFit:"cover"}}/>:<img src={foto} alt="cap" style={{width:"100%",height:"100%",objectFit:"cover"}}/>}
-          {!foto&&!semCam&&<div style={{position:"absolute",inset:18,border:"2px dashed #3b82f6",borderRadius:10,pointerEvents:"none"}}/>}
-        </div>
-        <canvas ref={cRef} style={{display:"none"}}/>
-        <div style={{display:"flex",flexDirection:"column",gap:8}}>
-          {!foto?<>
-            {!semCam&&<button onClick={cap} style={S.btn("#1d4ed8")}>📸 Capturar foto</button>}
-            {semCam&&<button onClick={onOk} style={S.btn("#1d4ed8")}>Continuar sem camera</button>}
-          </>:<>
-            <button onClick={onOk} style={S.btn("#15803d")}>✅ Confirmar e votar</button>
-            <button onClick={()=>setFoto(null)} style={S.btnO}>🔄 Tirar novamente</button>
-          </>}
-          <button onClick={onCancel} style={{...S.btnO,color:"#dc2626",borderColor:"#fca5a5"}}>Cancelar</button>
-        </div>
+    <div style={S.page}><div style={{...S.card,width:"100%",maxWidth:420}}>
+      <h2 style={{fontWeight:700,textAlign:"center",fontSize:20,color:"#1e3a5f",marginBottom:4}}>Identificacao Facial</h2>
+      <p style={{textAlign:"center",color:"#6b7280",fontSize:13,marginBottom:4}}>Ola, <strong>{user.nome}</strong></p>
+      <p style={{textAlign:"center",color:"#9ca3af",fontSize:12,marginBottom:14}}>Unidade {user.unidade} | Tire uma foto para confirmar sua identidade</p>
+      {semCam&&<div style={{...S.badge(false),display:"block",textAlign:"center",padding:"8px",marginBottom:12}}>Camera nao disponivel no dispositivo</div>}
+      <div style={{background:"#f3f4f6",borderRadius:10,overflow:"hidden",marginBottom:14,aspectRatio:"4/3",display:"flex",alignItems:"center",justifyContent:"center",position:"relative"}}>
+        {!foto?<video ref={vRef} autoPlay playsInline muted style={{width:"100%",height:"100%",objectFit:"cover"}}/>:<img src={foto} alt="foto" style={{width:"100%",height:"100%",objectFit:"cover"}}/>}
+        {!foto&&!semCam&&<div style={{position:"absolute",inset:18,border:"2px dashed #3b82f6",borderRadius:10,pointerEvents:"none"}}/>}
       </div>
-    </div>
+      <canvas ref={cRef} style={{display:"none"}}/>
+      <div style={{display:"flex",flexDirection:"column",gap:8}}>
+        {!foto?<>
+          {!semCam&&<button onClick={cap} style={S.btn("#1d4ed8")}>📸 Capturar foto</button>}
+          {semCam&&<button onClick={onOk} style={S.btn("#1d4ed8")}>Continuar sem camera</button>}
+        </>:<>
+          <button onClick={onOk} style={S.btn("#15803d")}>✅ Confirmar e votar</button>
+          <button onClick={()=>setFoto(null)} style={S.btnO}>🔄 Tirar novamente</button>
+        </>}
+        <button onClick={onCancel} style={{...S.btnO,color:"#dc2626",borderColor:"#fca5a5"}}>Cancelar</button>
+      </div>
+    </div></div>
   );
 }
+
+/* ══════════ VOTAR ══════════ */
 function Votar({user,enq,cond,lista,votos,vot,onVotar,onCancel}){
   const[proc,setProc]=useState(false);const[urep,setUrep]=useState("");const[conf,setConf]=useState(null);const[err,setErr]=useState("");
-  useEffect(()=>{if(vot.status==="encerrada")onCancel();},[vot.status]);
+  useEffect(()=>{if(vot&&vot.status==="encerrada")onCancel();},[vot?.status]);
   const disp=lista.filter(m=>m.unidade!==user.unidade&&!votos.find(v=>v.unidade===m.unidade)&&!m.inadimplente);
-  const votar=v=>{if(proc&&!urep){setErr("Selecione a unidade representada.");return;}setErr("");setConf(v);};
+  const votar=v=>{if(proc&&!urep){setErr("Selecione a unidade.");return;}setErr("");setConf(v);};
   const ico={Aprovado:"✅",Reprovado:"❌","Abstencao":"⚪"};
   const clr={Aprovado:"#15803d",Reprovado:"#b91c1c","Abstencao":"#4b5563"};
   if(conf)return(
     <div style={S.page}><div style={{...S.card,width:"100%",maxWidth:340,textAlign:"center"}}>
       <div style={{fontSize:56,marginBottom:8}}>{ico[conf]}</div>
       <h2 style={{fontWeight:700,marginBottom:6,color:"#1e3a5f"}}>Confirmar voto?</h2>
-      <p style={{fontSize:13,color:"#6b7280",marginBottom:10}}>{enq.tema}</p>
+      <p style={{fontSize:13,color:"#6b7280",marginBottom:10}}>{enq?.tema}</p>
       <p style={{fontSize:28,fontWeight:700,color:clr[conf],marginBottom:14}}>{conf}</p>
       {proc&&<p style={{fontSize:13,color:"#1d4ed8",marginBottom:14}}>Procurador da unidade {urep}</p>}
       <div style={{display:"flex",gap:8}}>
@@ -155,15 +333,15 @@ function Votar({user,enq,cond,lista,votos,vot,onVotar,onCancel}){
       <div style={{background:"#f0f9ff",borderRadius:8,padding:"8px 12px",marginBottom:12,textAlign:"center"}}><Crono vot={vot}/></div>
       <div style={{background:"#eff6ff",borderRadius:8,padding:"12px 14px",marginBottom:14}}>
         <p style={{fontSize:11,fontWeight:700,color:"#1d4ed8",textTransform:"uppercase",marginBottom:2}}>Pauta</p>
-        <p style={{fontWeight:600,color:"#1e3a5f"}}>{enq.tema}</p>
-        {enq.descricao&&<p style={{fontSize:13,color:"#6b7280",marginTop:4}}>{enq.descricao}</p>}
+        <p style={{fontWeight:600,color:"#1e3a5f"}}>{enq?.tema}</p>
+        {enq?.descricao&&<p style={{fontSize:13,color:"#6b7280",marginTop:4}}>{enq.descricao}</p>}
       </div>
       <div style={{marginBottom:14}}>
         <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:14,marginBottom:proc?8:0}}>
           <input type="checkbox" checked={proc} onChange={e=>setProc(e.target.checked)}/> Sou procurador de outra unidade
         </label>
         {proc&&<select style={S.inp} value={urep} onChange={e=>setUrep(e.target.value)}>
-          <option value="">Selecione a unidade representada...</option>
+          <option value="">Selecione a unidade...</option>
           {disp.map(m=><option key={m.unidade} value={m.unidade}>Unidade {m.unidade} — {m.nome}</option>)}
         </select>}
         {err&&<p style={{color:"#dc2626",fontSize:13,marginTop:4}}>{err}</p>}
@@ -171,7 +349,7 @@ function Votar({user,enq,cond,lista,votos,vot,onVotar,onCancel}){
       <p style={{textAlign:"center",fontSize:13,color:"#6b7280",marginBottom:10}}>Selecione seu voto:</p>
       <div style={{display:"flex",gap:8,marginBottom:12}}>
         {["Aprovado","Reprovado","Abstencao"].map(v=>(
-          <button key={v} onClick={()=>votar(v)} style={{flex:1,padding:"14px 4px",border:"none",borderRadius:8,background:clr[v],color:"#fff",fontWeight:700,cursor:"pointer",fontSize:13}}>
+          <button key={v} onClick={()=>votar(v)} style={{flex:1,padding:"16px 4px",border:"none",borderRadius:8,background:clr[v],color:"#fff",fontWeight:700,cursor:"pointer",fontSize:13,lineHeight:1.4}}>
             {ico[v]}<br/>{v}
           </button>
         ))}
@@ -180,7 +358,9 @@ function Votar({user,enq,cond,lista,votos,vot,onVotar,onCancel}){
     </div></div>
   );
 }
-function Admin({conds,setConds,enq,setEnq,lista,setLista,votos,setVotos,vot,setVot,cond,onLogout,onRes}){
+
+/* ══════════ ADMIN ══════════ */
+function Admin({conds,enq,lista,votos,vot,cond,onLogout,onRes}){
   const[tab,setTab]=useState("dash");
   const tabs=[["dash","📊 Dashboard"],["enq","📋 Enquete"],["lista","👥 Lista"],["conds","🏢 Condominios"],["votos","🗳️ Votos"]];
   return(
@@ -188,56 +368,55 @@ function Admin({conds,setConds,enq,setEnq,lista,setLista,votos,setVotos,vot,setV
       <header style={{background:"#1e3a5f",padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
         <div style={{display:"flex",alignItems:"center",gap:10}}>
           <span style={{fontSize:22}}>🗳️</span>
-          <div><p style={{fontWeight:700,fontSize:16,color:"#fff",lineHeight:1}}>Urna Digital</p><p style={{fontSize:11,color:"#93c5fd"}}>Painel Administrativo</p></div>
+          <div><p style={{fontWeight:700,fontSize:15,color:"#fff",lineHeight:1}}>Urna Digital</p><p style={{fontSize:11,color:"#93c5fd"}}>Painel Administrativo</p></div>
         </div>
-        <div style={{display:"flex",alignItems:"center",gap:12}}>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
           <Crono vot={vot}/>
-          <button onClick={onRes} style={{...S.btn("#1d4ed8"),width:"auto",padding:"7px 14px",fontSize:13}}>Resultado</button>
-          <button onClick={onLogout} style={{...S.btn("#b91c1c"),width:"auto",padding:"7px 14px",fontSize:13}}>Sair</button>
+          <button onClick={onRes} style={{...S.btn("#1d4ed8"),width:"auto",padding:"6px 12px",fontSize:12}}>Resultado</button>
+          <button onClick={onLogout} style={{...S.btn("#b91c1c"),width:"auto",padding:"6px 12px",fontSize:12}}>Sair</button>
         </div>
       </header>
       <nav style={{background:"#fff",borderBottom:"1px solid #e5e7eb",display:"flex",overflowX:"auto"}}>
         {tabs.map(([k,l])=>(
-          <button key={k} onClick={()=>setTab(k)} style={{padding:"11px 16px",border:"none",borderBottom:tab===k?"2px solid #1d4ed8":"2px solid transparent",background:"transparent",cursor:"pointer",whiteSpace:"nowrap",fontSize:13,fontWeight:tab===k?700:400,color:tab===k?"#1d4ed8":"#6b7280"}}>{l}</button>
+          <button key={k} onClick={()=>setTab(k)} style={{padding:"11px 14px",border:"none",borderBottom:tab===k?"2px solid #1d4ed8":"2px solid transparent",background:"transparent",cursor:"pointer",whiteSpace:"nowrap",fontSize:13,fontWeight:tab===k?700:400,color:tab===k?"#1d4ed8":"#6b7280"}}>{l}</button>
         ))}
       </nav>
       <div style={{padding:16,maxWidth:800,margin:"0 auto"}}>
-        {tab==="dash"&&<Dash cond={cond} lista={lista} votos={votos} enq={enq} vot={vot} setVot={setVot} onRes={onRes}/>}
-        {tab==="enq"&&<TabEnq enq={enq} setEnq={setEnq} conds={conds} vot={vot}/>}
-        {tab==="lista"&&<TabLista lista={lista} setLista={setLista}/>}
-        {tab==="conds"&&<TabConds conds={conds} setConds={setConds}/>}
-        {tab==="votos"&&<TabVotos votos={votos} setVotos={setVotos}/>}
+        {tab==="dash"  &&<Dash  cond={cond} lista={lista} votos={votos} enq={enq} vot={vot} onRes={onRes}/>}
+        {tab==="enq"   &&<TabEnq enq={enq} conds={conds} vot={vot}/>}
+        {tab==="lista" &&<TabLista lista={lista}/>}
+        {tab==="conds" &&<TabConds conds={conds}/>}
+        {tab==="votos" &&<TabVotos votos={votos}/>}
       </div>
     </div>
   );
 }
-function Dash({cond,lista,votos,enq,vot,setVot,onRes}){
+
+function Dash({cond,lista,votos,enq,vot,onRes}){
   const aptos=lista.filter(m=>!m.inadimplente).length;
   const votaram=new Set(votos.map(v=>v.unidade)).size;
   const ap=votos.filter(v=>v.voto==="Aprovado").length,rp=votos.filter(v=>v.voto==="Reprovado").length,ab=votos.filter(v=>v.voto==="Abstencao").length;
-  const iniciar=()=>setVot({status:"aberta",inicioTs:Date.now(),fimTs:null,duracaoSeg:enq.duracaoMin*60});
-  const encerrar=()=>setVot(v=>({...v,status:"encerrada",fimTs:Date.now()}));
-  const reiniciar=()=>setVot(INIT_VOT);
-  const metrics=[["Aptos a votar",aptos],["Votaram",votaram],["Aprovados",ap],["Reprovados",rp],["Abstencoes",ab],["Quorum",pct(votaram,aptos)+"%"]];
+  const iniciar=()=>dbSet("vot",{status:"aberta",inicioTs:Date.now(),fimTs:null,duracaoSeg:(enq?.duracaoMin||10)*60});
+  const encerrar=()=>dbSet("vot",{...vot,status:"encerrada",fimTs:Date.now()});
+  const reiniciar=()=>{dbSet("vot",{status:"aguardando",inicioTs:null,fimTs:null,duracaoSeg:600});dbSet("votos",null);};
   return(
     <div style={{display:"flex",flexDirection:"column",gap:14}}>
       <div style={S.card}>
-        <p style={{...S.lbl,marginBottom:2}}>Assembleia ativa</p>
-        <p style={{fontWeight:700,fontSize:16,color:"#1e3a5f",marginBottom:2}}>{cond?.nome||"Nenhuma ativa"}</p>
-        <p style={{fontSize:13,color:"#6b7280",marginBottom:2}}>{enq.tema}</p>
-        <p style={{fontSize:12,color:"#9ca3af",marginBottom:14}}>Duracao: {enq.duracaoMin} min</p>
+        <p style={{fontWeight:700,fontSize:16,color:"#1e3a5f",marginBottom:2}}>{cond?.nome||"Configure o condominio"}</p>
+        <p style={{fontSize:13,color:"#6b7280",marginBottom:2}}>{enq?.tema||"Configure a pauta na aba Enquete"}</p>
+        <p style={{fontSize:12,color:"#9ca3af",marginBottom:14}}>Duracao: {enq?.duracaoMin||10} min</p>
         <Crono vot={vot} big/>
         <div style={{display:"flex",gap:8,marginTop:16,flexWrap:"wrap"}}>
-          {vot.status==="aguardando"&&<button onClick={iniciar} style={S.btn("#15803d")}>▶ Iniciar Votacao</button>}
-          {vot.status==="aberta"&&<button onClick={encerrar} style={S.btn("#b91c1c")}>🔒 Encerrar agora</button>}
-          {vot.status==="encerrada"&&<>
-            <button onClick={onRes} style={{...S.btn("#1d4ed8"),flex:1}}>📊 Ver resultado final</button>
+          {(!vot||vot.status==="aguardando")&&<button onClick={iniciar} style={S.btn("#15803d")}>▶ Iniciar Votacao</button>}
+          {vot?.status==="aberta"&&<button onClick={encerrar} style={S.btn("#b91c1c")}>🔒 Encerrar agora</button>}
+          {vot?.status==="encerrada"&&<>
+            <button onClick={onRes} style={{...S.btn("#1d4ed8"),flex:1}}>📊 Ver resultado</button>
             <button onClick={reiniciar} style={{...S.btnO,flex:1}}>🔄 Nova votacao</button>
           </>}
         </div>
       </div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10}}>
-        {metrics.map(([l,v])=>(
+        {[["Aptos",aptos],["Votaram",votaram],["Aprovados",ap],["Reprovados",rp],["Abstencoes",ab],["Quorum",pct(votaram,aptos)+"%"]].map(([l,v])=>(
           <div key={l} style={{background:"#f9fafb",borderRadius:8,padding:"12px 10px",textAlign:"center",border:"1px solid #e5e7eb"}}>
             <p style={{fontSize:22,fontWeight:700,color:"#1e3a5f",marginBottom:2}}>{v}</p>
             <p style={{fontSize:11,color:"#6b7280"}}>{l}</p>
@@ -245,34 +424,41 @@ function Dash({cond,lista,votos,enq,vot,setVot,onRes}){
         ))}
       </div>
       <div style={S.card}>
-        <p style={{...S.lbl,marginBottom:6}}>Progresso</p>
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+          <p style={{...S.lbl,marginBottom:0}}>Progresso em tempo real 🔴</p>
+          <p style={{fontSize:12,color:"#9ca3af"}}>{votaram}/{aptos}</p>
+        </div>
         <div style={{background:"#e5e7eb",borderRadius:99,height:10,overflow:"hidden"}}>
           <div style={{width:pct(votaram,aptos)+"%",height:"100%",background:"#1d4ed8",borderRadius:99,transition:"width .5s"}}/>
         </div>
-        <p style={{fontSize:12,color:"#9ca3af",marginTop:4}}>{votaram} de {aptos} unidades aptas</p>
       </div>
     </div>
   );
 }
-function TabEnq({enq,setEnq,conds,vot}){
-  const[f,setF]=useState(enq);const lock=vot.status!=="aguardando";
+
+function TabEnq({enq,conds,vot}){
+  const[f,setF]=useState(enq||{});
+  useEffect(()=>{if(enq)setF(enq);},[JSON.stringify(enq)]);
+  const lock=vot?.status==="aberta";
   return(
     <div style={S.card}>
-      <h3 style={{fontWeight:700,marginBottom:14,color:"#1e3a5f"}}>Configurar enquete</h3>
-      {lock&&<div style={{background:"#fee2e2",color:"#991b1b",padding:"8px 12px",borderRadius:8,marginBottom:14,fontSize:13}}>Votacao em andamento — encerre para editar.</div>}
-      {[["Condominio","condominioId","select"],["Tema","tema","text"],["Descricao","descricao","textarea"],["Duracao (minutos)","duracaoMin","number"]].map(([lb,k,tp])=>(
-        <div key={k} style={{marginBottom:12}}>
-          <label style={S.lbl}>{lb}</label>
-          {tp==="select"?<select disabled={lock} style={S.inp} value={f[k]} onChange={e=>setF(p=>({...p,[k]:+e.target.value}))}>{conds.map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}</select>
-          :tp==="textarea"?<textarea disabled={lock} rows={3} style={{...S.inp,resize:"vertical"}} value={f[k]} onChange={e=>setF(p=>({...p,[k]:e.target.value}))}/>
-          :<input disabled={lock} type={tp} min={1} max={180} style={S.inp} value={f[k]} onChange={e=>setF(p=>({...p,[k]:tp==="number"?+e.target.value:e.target.value}))}/>}
-        </div>
-      ))}
-      <button disabled={lock} onClick={()=>setEnq(f)} style={S.btn(lock?"#9ca3af":"#1d4ed8")}>Salvar enquete</button>
+      <h3 style={{fontWeight:700,marginBottom:14,color:"#1e3a5f"}}>⚙️ Configurar Enquete</h3>
+      {lock&&<div style={{background:"#fef9c3",color:"#854d0e",padding:"8px 12px",borderRadius:8,marginBottom:14,fontSize:13}}>⚠️ Votacao em andamento. Encerre para editar.</div>}
+      <div style={{marginBottom:12}}>
+        <label style={S.lbl}>Condominio ativo</label>
+        <select disabled={lock} style={S.inp} value={f.condominioId||""} onChange={e=>setF(p=>({...p,condominioId:+e.target.value}))}>
+          {conds.map((c,i)=><option key={c.id||i} value={c.id||i}>{c.nome}</option>)}
+        </select>
+      </div>
+      <div style={{marginBottom:12}}><label style={S.lbl}>Tema / Pauta</label><input disabled={lock} style={S.inp} value={f.tema||""} onChange={e=>setF(p=>({...p,tema:e.target.value}))} placeholder="Ex: Aprovacao do fundo de reserva 2025"/></div>
+      <div style={{marginBottom:12}}><label style={S.lbl}>Descricao</label><textarea disabled={lock} rows={3} style={{...S.inp,resize:"vertical"}} value={f.descricao||""} onChange={e=>setF(p=>({...p,descricao:e.target.value}))} placeholder="Detalhes da votacao..."/></div>
+      <div style={{marginBottom:14}}><label style={S.lbl}>Duracao da votacao (minutos)</label><input disabled={lock} type="number" min={1} max={180} style={S.inp} value={f.duracaoMin||10} onChange={e=>setF(p=>({...p,duracaoMin:+e.target.value}))}/></div>
+      <button disabled={lock} onClick={()=>dbSet("enq",f)} style={S.btn(lock?"#9ca3af":"#1d4ed8")}>💾 Salvar Enquete</button>
     </div>
   );
 }
-function TabLista({lista,setLista}){
+
+function TabLista({lista}){
   const[editI,setEditI]=useState(null);const[form,setForm]=useState({});const fRef=useRef();
   const imp=async e=>{
     const file=e.target.files[0];if(!file)return;
@@ -280,18 +466,22 @@ function TabLista({lista,setLista}){
     const buf=await file.arrayBuffer();
     const wb=window.XLSX.read(buf);
     const rows=window.XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:""});
-    setLista(rows.map(r=>({unidade:String(r.unidade||r.Unidade||""),nome:String(r.nome||r.Nome||""),cpf:digits(String(r.cpf||r.CPF||"")),senha:String(r.senha||r.Senha||"1234"),inadimplente:String(r.inadimplente||r.Inadimplente||"").toLowerCase()==="sim"})));
-    e.target.value="";
+    const obj={};
+    rows.forEach((r,i)=>{obj[i]={unidade:String(r.unidade||r.Unidade||""),nome:String(r.nome||r.Nome||""),cpf:dig(String(r.cpf||r.CPF||"")),senha:String(r.senha||r.Senha||"1234"),inadimplente:String(r.inadimplente||r.Inadimplente||"").toLowerCase()==="sim"};});
+    dbSet("lista",obj);e.target.value="";
+    alert("Lista importada com sucesso! "+rows.length+" moradores.");
   };
   return(
     <div style={{display:"flex",flexDirection:"column",gap:12}}>
       <div style={S.card}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,flexWrap:"wrap",gap:8}}>
-          <h3 style={{fontWeight:700,color:"#1e3a5f"}}>Lista de Chamada</h3>
+          <div><h3 style={{fontWeight:700,color:"#1e3a5f"}}>👥 Lista de Chamada</h3><p style={{fontSize:12,color:"#9ca3af",marginTop:2}}>{lista.length} moradores cadastrados</p></div>
           <button onClick={()=>fRef.current.click()} style={{...S.btn("#1d4ed8"),width:"auto",padding:"7px 14px",fontSize:13}}>📂 Importar Excel</button>
           <input ref={fRef} type="file" accept=".xlsx,.xls" style={{display:"none"}} onChange={imp}/>
         </div>
-        <p style={{fontSize:12,color:"#9ca3af",marginBottom:12}}>Colunas: unidade · nome · cpf · senha · inadimplente (sim/nao)</p>
+        <div style={{background:"#fffbeb",border:"1px solid #fde68a",borderRadius:8,padding:"8px 12px",marginBottom:12,fontSize:12,color:"#92400e"}}>
+          <strong>Formato do Excel:</strong> colunas: unidade | nome | cpf | senha | inadimplente (sim/nao)
+        </div>
         <div style={{overflowX:"auto"}}>
           <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
             <thead><tr style={{background:"#f9fafb"}}>
@@ -302,11 +492,8 @@ function TabLista({lista,setLista}){
                 <td style={{padding:"8px 10px",fontWeight:600}}>{m.unidade}</td>
                 <td style={{padding:"8px 10px"}}>{m.nome}</td>
                 <td style={{padding:"8px 10px",color:"#9ca3af",fontSize:12}}>{fmtCPF(m.cpf)}</td>
-                <td style={{padding:"8px 10px"}}><button onClick={()=>setLista(l=>l.map((x,j)=>j===i?{...x,inadimplente:!x.inadimplente}:x))} style={{...S.badge(!m.inadimplente),cursor:"pointer",border:"none"}}>{m.inadimplente?"Inadimplente":"Regular"}</button></td>
-                <td style={{padding:"8px 10px",whiteSpace:"nowrap"}}>
-                  <button onClick={()=>{setEditI(i);setForm(lista[i]);}} style={{background:"none",border:"none",color:"#1d4ed8",cursor:"pointer",fontSize:13,marginRight:8}}>Editar</button>
-                  <button onClick={()=>setLista(l=>l.filter((_,j)=>j!==i))} style={{background:"none",border:"none",color:"#dc2626",cursor:"pointer",fontSize:13}}>Remover</button>
-                </td>
+                <td style={{padding:"8px 10px"}}><button onClick={()=>dbSet("lista/"+i,{...m,inadimplente:!m.inadimplente})} style={{...S.badge(!m.inadimplente),cursor:"pointer",border:"none"}}>{m.inadimplente?"Inadimplente":"Regular"}</button></td>
+                <td style={{padding:"8px 10px"}}><button onClick={()=>{setEditI(i);setForm({...m});}} style={{background:"none",border:"none",color:"#1d4ed8",cursor:"pointer",fontSize:12}}>Editar</button></td>
               </tr>
             ))}</tbody>
           </table>
@@ -316,9 +503,9 @@ function TabLista({lista,setLista}){
         <div style={S.card}>
           <h4 style={{fontWeight:700,marginBottom:12,color:"#1e3a5f"}}>Editar morador</h4>
           {["unidade","nome","cpf","senha"].map(k=>(<div key={k} style={{marginBottom:10}}><label style={S.lbl}>{k.charAt(0).toUpperCase()+k.slice(1)}</label><input style={S.inp} value={form[k]||""} onChange={e=>setForm(p=>({...p,[k]:e.target.value}))}/></div>))}
-          <label style={{display:"flex",alignItems:"center",gap:8,fontSize:14,marginBottom:12,cursor:"pointer"}}><input type="checkbox" checked={form.inadimplente} onChange={e=>setForm(p=>({...p,inadimplente:e.target.checked}))}/> Inadimplente</label>
+          <label style={{display:"flex",alignItems:"center",gap:8,fontSize:14,marginBottom:12,cursor:"pointer"}}><input type="checkbox" checked={form.inadimplente||false} onChange={e=>setForm(p=>({...p,inadimplente:e.target.checked}))}/> Inadimplente</label>
           <div style={{display:"flex",gap:8}}>
-            <button onClick={()=>{setLista(l=>l.map((m,j)=>j===editI?form:m));setEditI(null);}} style={{...S.btn("#1d4ed8"),flex:1}}>Salvar</button>
+            <button onClick={()=>{dbSet("lista/"+editI,form);setEditI(null);}} style={{...S.btn("#1d4ed8"),flex:1}}>Salvar</button>
             <button onClick={()=>setEditI(null)} style={{...S.btnO,flex:1}}>Cancelar</button>
           </div>
         </div>
@@ -326,139 +513,123 @@ function TabLista({lista,setLista}){
     </div>
   );
 }
-function TabConds({conds,setConds}){
+
+function TabConds({conds}){
   const[novo,setNovo]=useState("");
+  const ativar=(idx)=>dbSet("conds",conds.map((c,i)=>({...c,ativo:i===idx})));
+  const adicionar=()=>{if(!novo.trim())return;dbSet("conds",[...conds,{id:Date.now(),nome:novo.trim(),ativo:false}]);setNovo("");};
   return(
     <div style={S.card}>
-      <h3 style={{fontWeight:700,marginBottom:14,color:"#1e3a5f"}}>Condominios</h3>
+      <h3 style={{fontWeight:700,marginBottom:14,color:"#1e3a5f"}}>🏢 Condominios</h3>
+      <div style={{background:"#eff6ff",borderRadius:8,padding:10,marginBottom:14,fontSize:13,color:"#1e40af"}}>
+        💡 O condominio ativo aparece na tela de login dos moradores. Mude aqui antes da assembleia.
+      </div>
       <div style={{display:"flex",gap:8,marginBottom:14}}>
         <input style={{...S.inp,flex:1}} placeholder="Nome do condominio..." value={novo} onChange={e=>setNovo(e.target.value)}/>
-        <button onClick={()=>{if(!novo.trim())return;setConds(l=>[...l,{id:Date.now(),nome:novo.trim(),ativo:false}]);setNovo("");}} style={{...S.btn("#1d4ed8"),width:"auto",padding:"8px 16px"}}>Adicionar</button>
+        <button onClick={adicionar} style={{...S.btn("#1d4ed8"),width:"auto",padding:"8px 16px"}}>Adicionar</button>
       </div>
-      {conds.map(c=>(
-        <div key={c.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",border:"1px solid #e5e7eb",borderRadius:8,padding:"10px 14px",marginBottom:8}}>
-          <div><p style={{fontWeight:600}}>{c.nome}</p>{c.ativo&&<span style={S.badge(true)}>Ativo hoje</span>}</div>
-          <div style={{display:"flex",gap:6}}>
-            {!c.ativo&&<button onClick={()=>setConds(l=>l.map(x=>({...x,ativo:x.id===c.id})))} style={{...S.btn("#15803d"),width:"auto",padding:"6px 12px",fontSize:13}}>Ativar</button>}
-            <button onClick={()=>setConds(l=>l.filter(x=>x.id!==c.id))} style={{...S.btn("#b91c1c"),width:"auto",padding:"6px 12px",fontSize:13}}>Remover</button>
-          </div>
+      {conds.map((c,i)=>(
+        <div key={c.id||i} style={{display:"flex",alignItems:"center",justifyContent:"space-between",border:"1px solid #e5e7eb",borderRadius:8,padding:"10px 14px",marginBottom:8,background:c.ativo?"#f0fdf4":"#fff"}}>
+          <div><p style={{fontWeight:600}}>{c.nome}</p>{c.ativo&&<span style={{...S.badge(true),marginTop:2}}>✅ Ativo agora</span>}</div>
+          {!c.ativo&&<button onClick={()=>ativar(i)} style={{...S.btn("#15803d"),width:"auto",padding:"6px 14px",fontSize:13}}>Ativar</button>}
         </div>
       ))}
     </div>
   );
 }
-function TabVotos({votos,setVotos}){
+
+function TabVotos({votos}){
+  const editar=(key,val)=>dbSet("votos/"+key+"/voto",val);
+  const remover=(key)=>dbRemove("votos/"+key);
   return(
     <div style={S.card}>
-      <h3 style={{fontWeight:700,marginBottom:12,color:"#1e3a5f"}}>Votos registrados</h3>
+      <h3 style={{fontWeight:700,marginBottom:12,color:"#1e3a5f"}}>🗳️ Votos — Tempo Real 🔴</h3>
       {votos.length===0&&<p style={{color:"#9ca3af",textAlign:"center",padding:24}}>Nenhum voto registrado ainda.</p>}
-      {votos.map((v,i)=>(
-        <div key={i} style={{border:"1px solid #e5e7eb",borderRadius:8,padding:"10px 14px",marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+      {votos.map(v=>(
+        <div key={v._key} style={{border:"1px solid #e5e7eb",borderRadius:8,padding:"10px 14px",marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
           <div>
             <p style={{fontWeight:600,fontSize:14}}>{v.nome} — Unid. {v.unidade}</p>
             {v.procurador&&<p style={{fontSize:12,color:"#1d4ed8"}}>Procurador de {v.unidadeRep}</p>}
             <p style={{fontSize:12,color:"#9ca3af"}}>{v.ts}</p>
           </div>
           <div style={{display:"flex",gap:8,alignItems:"center"}}>
-            <select value={v.voto} onChange={e=>setVotos(vs=>vs.map((x,j)=>j===i?{...x,voto:e.target.value}:x))} style={{...S.inp,width:"auto",fontSize:13}}>
+            <select value={v.voto} onChange={e=>editar(v._key,e.target.value)} style={{...S.inp,width:"auto",fontSize:13}}>
               <option>Aprovado</option><option>Reprovado</option><option>Abstencao</option>
             </select>
-            <button onClick={()=>setVotos(vs=>vs.filter((_,j)=>j!==i))} style={{background:"none",border:"none",color:"#dc2626",cursor:"pointer",fontSize:13}}>Remover</button>
+            <button onClick={()=>remover(v._key)} style={{background:"none",border:"none",color:"#dc2626",cursor:"pointer",fontSize:13}}>✕</button>
           </div>
         </div>
       ))}
     </div>
   );
 }
+
+/* ══════════ RESULTADO ══════════ */
 function Resultado({votos,enq,cond,lista,vot,onBack}){
   const ap=votos.filter(v=>v.voto==="Aprovado").length,rp=votos.filter(v=>v.voto==="Reprovado").length,ab=votos.filter(v=>v.voto==="Abstencao").length;
   const total=votos.length,aptos=lista.filter(m=>!m.inadimplente).length,votaram=new Set(votos.map(v=>v.unidade)).size;
   const ven=ap>rp?"APROVADO":rp>ap?"REPROVADO":"EMPATE";
   const vBg=ven==="APROVADO"?"#dcfce7":ven==="REPROVADO"?"#fee2e2":"#f3f4f6";
   const vTx=ven==="APROVADO"?"#166534":ven==="REPROVADO"?"#991b1b":"#374151";
-  const dur=vot.inicioTs&&vot.fimTs?Math.round((vot.fimTs-vot.inicioTs)/1000):null;
-  const bars=[["✅ Aprovado",ap,"#15803d"],["❌ Reprovado",rp,"#b91c1c"],["⚪ Abstencao",ab,"#4b5563"]];
-  const summ=[["Total de votos",total],["Quorum",pct(votaram,aptos)+"%"],["Unidades aptas",aptos],["Ausentes",aptos-votaram],["Aprovados",ap],["Reprovados",rp],["Abstencoes",ab],["Maioria",ap>rp?"Sim ✅":"Nao ❌"]];
+  const dur=vot?.inicioTs&&vot?.fimTs?Math.round((vot.fimTs-vot.inicioTs)/1000):null;
   return(
     <div style={{background:"#f0f4f8",minHeight:"100vh",padding:16}}>
       <div style={{maxWidth:560,margin:"0 auto",display:"flex",flexDirection:"column",gap:14}}>
         <div style={{...S.card,textAlign:"center"}}>
           <div style={{fontSize:34,marginBottom:4}}>📊</div>
           <h2 style={{fontWeight:700,fontSize:22,color:"#1e3a5f"}}>Resultado Final</h2>
-          {cond&&<p style={{fontSize:13,color:"#6b7280"}}>{cond.nome}</p>}
-          <p style={{fontWeight:600,marginTop:4,color:"#1e3a5f"}}>{enq.tema}</p>
-          {dur&&<p style={{fontSize:12,color:"#9ca3af",marginTop:4}}>Duracao: {fmtTime(dur)}</p>}
+          {cond&&<p style={{fontSize:14,color:"#6b7280",fontWeight:500}}>{cond.nome}</p>}
+          <p style={{fontWeight:600,marginTop:4,color:"#1e3a5f"}}>{enq?.tema}</p>
+          {dur&&<p style={{fontSize:12,color:"#9ca3af",marginTop:4}}>Duracao total: {fmtT(dur)}</p>}
         </div>
-        <div style={{background:vBg,border:"1px solid "+vTx,borderRadius:14,padding:"18px 16px",textAlign:"center"}}>
-          <p style={{fontSize:12,fontWeight:700,color:vTx,textTransform:"uppercase",marginBottom:4}}>Resultado</p>
-          <p style={{fontSize:36,fontWeight:700,color:vTx}}>{ven==="APROVADO"?"✅":ven==="REPROVADO"?"❌":"⚖️"} {ven}</p>
+        <div style={{background:vBg,border:"1px solid "+vTx,borderRadius:14,padding:"20px 16px",textAlign:"center"}}>
+          <p style={{fontSize:12,fontWeight:700,color:vTx,textTransform:"uppercase",marginBottom:6}}>Resultado Final</p>
+          <p style={{fontSize:38,fontWeight:700,color:vTx}}>{ven==="APROVADO"?"✅":ven==="REPROVADO"?"❌":"⚖️"} {ven}</p>
         </div>
         <div style={S.card}>
-          <h3 style={{fontWeight:700,marginBottom:14,textAlign:"center",color:"#1e3a5f"}}>Apuracao dos votos</h3>
-          {bars.map(([l,v,bg])=>(
+          <h3 style={{fontWeight:700,marginBottom:14,textAlign:"center",color:"#1e3a5f"}}>Apuracao</h3>
+          {[["✅ Aprovado",ap,"#15803d"],["❌ Reprovado",rp,"#b91c1c"],["⚪ Abstencao",ab,"#4b5563"]].map(([l,v,bg])=>(
             <div key={l} style={{marginBottom:14}}>
               <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
                 <span style={{fontSize:14,fontWeight:600}}>{l}</span>
                 <span style={{fontSize:14,fontWeight:700,color:bg}}>{v} votos · {pct(v,total)}%</span>
               </div>
-              <div style={{background:"#e5e7eb",borderRadius:99,height:18,overflow:"hidden"}}>
+              <div style={{background:"#e5e7eb",borderRadius:99,height:20,overflow:"hidden"}}>
                 <div style={{width:pct(v,total)+"%",height:"100%",background:bg,borderRadius:99,display:"flex",alignItems:"center",justifyContent:"flex-end",paddingRight:v>0?8:0,transition:"width .7s"}}>
-                  {v>0&&<span style={{color:"#fff",fontSize:11,fontWeight:700}}>{pct(v,total)}%</span>}
+                  {Number(pct(v,total))>5&&<span style={{color:"#fff",fontSize:12,fontWeight:700}}>{pct(v,total)}%</span>}
                 </div>
               </div>
             </div>
           ))}
         </div>
         <div style={S.card}>
-          <h3 style={{fontWeight:700,marginBottom:14,textAlign:"center",color:"#1e3a5f"}}>Resumo geral</h3>
+          <h3 style={{fontWeight:700,marginBottom:14,textAlign:"center",color:"#1e3a5f"}}>Resumo</h3>
           <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10}}>
-            {summ.map(([l,v])=>(<div key={l} style={{background:"#f9fafb",borderRadius:8,padding:"12px 10px",textAlign:"center",border:"1px solid #e5e7eb"}}><p style={{fontSize:20,fontWeight:700,color:"#1e3a5f",marginBottom:2}}>{v}</p><p style={{fontSize:11,color:"#6b7280"}}>{l}</p></div>))}
+            {[["Total votos",total],["Quorum",pct(votaram,aptos)+"%"],["Aptos",aptos],["Ausentes",aptos-votaram],["Aprovados",ap],["Reprovados",rp],["Abstencoes",ab],["Maioria",ap>rp?"Sim ✅":"Nao ❌"]].map(([l,v])=>(
+              <div key={l} style={{background:"#f9fafb",borderRadius:8,padding:"12px 10px",textAlign:"center",border:"1px solid #e5e7eb"}}>
+                <p style={{fontSize:20,fontWeight:700,color:"#1e3a5f",marginBottom:2}}>{v}</p>
+                <p style={{fontSize:11,color:"#6b7280"}}>{l}</p>
+              </div>
+            ))}
           </div>
         </div>
-        {votos.length>0&&(<div style={S.card}>
-          <h3 style={{fontWeight:700,marginBottom:12,color:"#1e3a5f"}}>Detalhamento</h3>
-          {votos.map((v,i)=>(<div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderTop:i>0?"1px solid #f3f4f6":"none"}}>
-            <div><p style={{fontWeight:600,fontSize:14}}>Unid. {v.unidade} — {v.nome}</p>{v.procurador&&<p style={{fontSize:12,color:"#1d4ed8"}}>Procurador de {v.unidadeRep}</p>}<p style={{fontSize:11,color:"#9ca3af"}}>{v.ts}</p></div>
-            <span style={S.badge(v.voto==="Aprovado")}>{v.voto}</span>
-          </div>))}
-        </div>)}
+        {votos.length>0&&(
+          <div style={S.card}>
+            <h3 style={{fontWeight:700,marginBottom:12,color:"#1e3a5f"}}>Detalhamento</h3>
+            {votos.map((v,i)=>(
+              <div key={v._key||i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderTop:i>0?"1px solid #f3f4f6":"none"}}>
+                <div><p style={{fontWeight:600,fontSize:14}}>Unid. {v.unidade} — {v.nome}</p>{v.procurador&&<p style={{fontSize:12,color:"#1d4ed8"}}>Procurador de {v.unidadeRep}</p>}<p style={{fontSize:11,color:"#9ca3af"}}>{v.ts}</p></div>
+                <span style={S.badge(v.voto==="Aprovado")}>{v.voto}</span>
+              </div>
+            ))}
+          </div>
+        )}
         <button onClick={onBack} style={S.btnO}>← Voltar</button>
       </div>
     </div>
   );
 }
-function App(){
-  const[user,setUser]=useState(null);
-  const[conds,setConds]=useState(INIT_CONDS);
-  const[enq,setEnq]=useState(INIT_ENQ);
-  const[lista,setLista]=useState(INIT_LISTA);
-  const[votos,setVotos]=useState([]);
-  const[vot,setVot]=useState(INIT_VOT);
-  const[page,setPage]=useState("login");
-  const cond=conds.find(c=>c.ativo);
-  useEffect(()=>{
-    if(vot.status!=="aberta")return;
-    const t=setInterval(()=>{if(Math.floor((Date.now()-vot.inicioTs)/1000)>=vot.duracaoSeg)setVot(v=>({...v,status:"encerrada",fimTs:Date.now()}));},500);
-    return()=>clearInterval(t);
-  },[vot.status]);
-  const login=(cpf,senha)=>{
-    if(cpf===ADMIN.cpf&&senha===ADMIN.senha){setUser(ADMIN);setPage("admin");return null;}
-    if(vot.status==="aguardando")return"A votacao ainda nao foi iniciada.";
-    if(vot.status==="encerrada")return"A votacao foi encerrada.";
-    const m=lista.find(x=>x.cpf===cpf&&x.senha===senha);
-    if(!m)return"CPF ou senha invalidos.";
-    if(m.inadimplente)return"Unidade inadimplente — votacao bloqueada.";
-    if(votos.find(v=>v.unidade===m.unidade&&!v.procurador))return"Sua unidade ja votou.";
-    setUser({...m,role:"morador"});setPage("facial");return null;
-  };
-  const registrar=d=>{setVotos(v=>[...v,{...d,ts:new Date().toLocaleTimeString("pt-BR")}]);setUser(null);setPage("login");};
-  if(page==="login")return <Login cond={cond} vot={vot} onLogin={login} onRes={()=>setPage("resultado")}/>;
-  if(page==="admin")return <Admin conds={conds} setConds={setConds} enq={enq} setEnq={setEnq} lista={lista} setLista={setLista} votos={votos} setVotos={setVotos} vot={vot} setVot={setVot} cond={cond} onLogout={()=>{setUser(null);setPage("login");}} onRes={()=>setPage("resultado")}/>;
-  if(page==="facial")return <Facial user={user} onOk={()=>setPage("votar")} onCancel={()=>{setUser(null);setPage("login");}}/>;
-  if(page==="votar")return <Votar user={user} enq={enq} cond={cond} lista={lista} votos={votos} vot={vot} onVotar={registrar} onCancel={()=>{setUser(null);setPage("login");}}/>;
-  if(page==="resultado")return <Resultado votos={votos} enq={enq} cond={cond} lista={lista} vot={vot} onBack={()=>setPage(user?.role==="admin"?"admin":"login")}/>;
-  return null;
-}
+
 ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
 </script>
 </body>
