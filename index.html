@@ -11,39 +11,43 @@
 <script type="module">
 import {initializeApp} from "https://www.gstatic.com/firebasejs/11.0.0/firebase-app.js";
 import {getDatabase,ref,set,onValue,push,remove} from "https://www.gstatic.com/firebasejs/11.0.0/firebase-database.js";
+import {getAuth,createUserWithEmailAndPassword,signInWithEmailAndPassword,signOut,onAuthStateChanged} from "https://www.gstatic.com/firebasejs/11.0.0/firebase-auth.js";
 const cfg={apiKey:"AIzaSyAEHUEIHEU5VfHHvYU0aNhSsxRvYaa5ojY",authDomain:"urna-digital-6ec84.firebaseapp.com",databaseURL:"https://urna-digital-6ec84-default-rtdb.firebaseio.com",projectId:"urna-digital-6ec84",storageBucket:"urna-digital-6ec84.firebasestorage.app",messagingSenderId:"100650474766",appId:"1:100650474766:web:69531e65a1170651bd4b5f"};
-const app=initializeApp(cfg);const db=getDatabase(app);
-window.__db=db;window.__ref=ref;window.__set=set;window.__onValue=onValue;window.__push=push;window.__remove=remove;
-window.__fbReady=true;window.dispatchEvent(new Event("fbReady"));
+const app=initializeApp(cfg);
+const db=getDatabase(app);
+const auth=getAuth(app);
+window.__db=db;window.__auth=auth;
+window.__ref=ref;window.__set=set;window.__onValue=onValue;window.__push=push;window.__remove=remove;
+window.__createUser=createUserWithEmailAndPassword;
+window.__signIn=signInWithEmailAndPassword;
+window.__signOut=signOut;
+window.__onAuth=onAuthStateChanged;
+window.__fbReady=true;
+window.dispatchEvent(new Event("fbReady"));
 </script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:system-ui,-apple-system,sans-serif;background:#f0f4f8;min-height:100vh}
 input,select,textarea,button{font-family:inherit;font-size:14px}
 input:focus,select:focus,textarea:focus{outline:2px solid #1d4ed8;outline-offset:1px}
-@media print{.no-print{display:none!important}.print-only{display:block!important}}
-.print-only{display:none}
 </style>
 </head>
 <body>
 <div id="root"><div style="display:flex;align-items:center;justify-content:center;min-height:100vh;flex-direction:column;gap:12px"><div style="font-size:48px">🗳️</div><p style="color:#6b7280">Carregando...</p></div></div>
 <script type="text/babel">
-const {useState,useRef,useEffect,useCallback}=React;
-const ADMIN_CPF="00000000000",ADMIN_SENHA="admin123";
-const LISTA_PAD=[
-  {unidade:"101",nome:"Carlos Silva",cpf:"11111111111",senha:"1234",inadimplente:false},
-  {unidade:"102",nome:"Maria Souza",cpf:"22222222222",senha:"1234",inadimplente:true},
-  {unidade:"201",nome:"Joao Pereira",cpf:"33333333333",senha:"1234",inadimplente:false},
-  {unidade:"301",nome:"Pedro Lima",cpf:"55555555555",senha:"1234",inadimplente:false},
-];
+const {useState,useRef,useEffect}=React;
+
+/* ═══ HELPERS ═══ */
 const dig=v=>v.replace(/\D/g,"").slice(0,11);
 const fmtCPF=v=>{const d=dig(v);if(d.length<=3)return d;if(d.length<=6)return d.slice(0,3)+"."+d.slice(3);if(d.length<=9)return d.slice(0,3)+"."+d.slice(3,6)+"."+d.slice(6);return d.slice(0,3)+"."+d.slice(3,6)+"."+d.slice(6,9)+"-"+d.slice(9);};
 const fmtT=s=>{if(s<=0)return"00:00";return String(Math.floor(s/60)).padStart(2,"0")+":"+String(s%60).padStart(2,"0");};
 const fmtDate=ts=>ts?new Date(ts).toLocaleString("pt-BR"):"—";
 const pct=(n,t)=>t>0?((n/t)*100).toFixed(1):"0.0";
-const dbSet=(p,v)=>window.__db&&window.__set(window.__ref(window.__db,p),v);
-const dbPush=(p,v)=>window.__db&&window.__push(window.__ref(window.__db,p),v);
-const dbDel=(p)=>window.__db&&window.__remove(window.__ref(window.__db,p));
+
+/* dados isolados por uid da administradora */
+const dbSet=(uid,p,v)=>window.__db&&window.__set(window.__ref(window.__db,"admins/"+uid+"/"+p),v);
+const dbPush=(uid,p,v)=>window.__db&&window.__push(window.__ref(window.__db,"admins/"+uid+"/"+p),v);
+const dbDel=(uid,p)=>window.__db&&window.__remove(window.__ref(window.__db,"admins/"+uid+"/"+p));
 
 const S={
   page:{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",padding:16,background:"#EFF6FF"},
@@ -55,13 +59,14 @@ const S={
   badge:ok=>({display:"inline-block",padding:"2px 10px",borderRadius:99,fontSize:12,fontWeight:600,background:ok?"#dcfce7":"#fee2e2",color:ok?"#166534":"#991b1b"}),
 };
 
-function useDB(path,def){
+function useDB(uid,path,def){
   const[v,setV]=useState(def);
   useEffect(()=>{
-    const sub=()=>{const r=window.__ref(window.__db,path);return window.__onValue(r,snap=>setV(snap.val()??def));};
+    if(!uid)return;
+    const sub=()=>{const r=window.__ref(window.__db,"admins/"+uid+"/"+path);return window.__onValue(r,snap=>setV(snap.val()??def));};
     if(window.__fbReady)return sub();
     const h=()=>sub();window.addEventListener("fbReady",h,{once:true});return()=>window.removeEventListener("fbReady",h);
-  },[path]);
+  },[uid,path]);
   return v;
 }
 
@@ -85,94 +90,192 @@ function Crono({vot,big}){
   return <span style={{color:cor,fontWeight:700,fontSize:14,fontVariantNumeric:"tabular-nums"}}>⏱ {fmtT(rest)}</span>;
 }
 
-/* ══ APP ══ */
+/* ═══ APP ROOT ═══ */
 function App(){
-  const[user,setUser]=useState(null);
-  const[page,setPage]=useState("login");
   const[fbOk,setFbOk]=useState(!!window.__fbReady);
+  const[authUser,setAuthUser]=useState(null); // usuario Firebase autenticado
+  const[authLoading,setAuthLoading]=useState(true);
+  const[page,setPage]=useState("inicio"); // inicio | admin | votar | facial | votando | resultado
+  const[moradorUser,setMoradorUser]=useState(null);
   const[fotoVotante,setFotoVotante]=useState(null);
 
-  const condsRaw=useDB("conds",null);
-  const enq=useDB("enq",{tema:"Configure a pauta no painel admin",descricao:"",condominioId:1,duracaoMin:10});
-  const listaObj=useDB("lista",null);
-  const votosObj=useDB("votos",null);
-  const vot=useDB("vot",{status:"aguardando",inicioTs:null,fimTs:null,duracaoSeg:600});
+  /* escuta autenticacao Firebase */
+  useEffect(()=>{
+    const unsub=window.__onAuth(window.__auth,user=>{setAuthUser(user);setAuthLoading(false);if(user)setPage("admin");});
+    return unsub;
+  },[]);
 
   useEffect(()=>{if(!window.__fbReady){const h=()=>setFbOk(true);window.addEventListener("fbReady",h,{once:true});return()=>window.removeEventListener("fbReady",h);}},[]);
-  useEffect(()=>{if(!fbOk||condsRaw!==null)return;dbSet("conds",[{id:1,nome:"Condominio Exemplo",ativo:true}]);},[fbOk,condsRaw]);
-  useEffect(()=>{if(!fbOk||listaObj!==null)return;const o={};LISTA_PAD.forEach((m,i)=>o[i]=m);dbSet("lista",o);},[fbOk,listaObj]);
+
+  /* dados isolados pelo UID da administradora */
+  const uid=authUser?.uid||null;
+  const condsRaw=useDB(uid,"conds",null);
+  const enq=useDB(uid,"enq",{tema:"Configure a pauta no painel admin",descricao:"",duracaoMin:10});
+  const listaObj=useDB(uid,"lista",null);
+  const votosObj=useDB(uid,"votos",null);
+  const vot=useDB(uid,"vot",{status:"aguardando",inicioTs:null,fimTs:null,duracaoSeg:600});
+
+  /* inicializa dados padrao */
+  useEffect(()=>{if(!uid||condsRaw!==null)return;dbSet(uid,"conds",[{id:1,nome:"Meu Condominio",ativo:true}]);},[uid,condsRaw]);
+  useEffect(()=>{if(!uid||listaObj!==null)return;},[uid,listaObj]);
 
   const conds=Array.isArray(condsRaw)?condsRaw:(condsRaw?Object.values(condsRaw):[]);
-  const lista=listaObj?Object.values(listaObj):LISTA_PAD;
+  const lista=listaObj?Object.values(listaObj):[];
   const votos=votosObj?Object.entries(votosObj).map(([k,v])=>({...v,_key:k})):[];
   const cond=conds.find(c=>c.ativo);
 
+  /* encerramento automatico */
   useEffect(()=>{
-    if(!vot||vot.status!=="aberta")return;
-    const t=setInterval(()=>{if(Math.floor((Date.now()-vot.inicioTs)/1000)>=vot.duracaoSeg)dbSet("vot",{...vot,status:"encerrada",fimTs:Date.now()});},500);
+    if(!vot||vot.status!=="aberta"||!uid)return;
+    const t=setInterval(()=>{if(Math.floor((Date.now()-vot.inicioTs)/1000)>=vot.duracaoSeg)dbSet(uid,"vot",{...vot,status:"encerrada",fimTs:Date.now()});},500);
     return()=>clearInterval(t);
-  },[vot?.status]);
+  },[vot?.status,uid]);
 
-  const login=(cpf,senha)=>{
-    if(cpf===ADMIN_CPF&&senha===ADMIN_SENHA){setUser({cpf,nome:"Administradora",role:"admin"});setPage("admin");return null;}
-    if(!vot||vot.status==="aguardando")return"Votacao nao iniciada pelo administrador.";
+  /* login de morador (usa lista da administradora ativa) */
+  const loginMorador=(cpf,senha,codCond)=>{
+    if(!vot||vot.status==="aguardando")return"Votacao nao iniciada.";
     if(vot.status==="encerrada")return"Votacao ja encerrada.";
     const m=lista.find(x=>x.cpf===cpf&&x.senha===senha);
     if(!m)return"CPF ou senha invalidos. Contate a administracao.";
-    if(m.inadimplente)return"Votacao bloqueada: pendencias financeiras na unidade.";
-    if(votos.find(v=>v.unidade===m.unidade&&!v.procurador))return"Sua unidade ja votou nesta sessao.";
-    setUser({...m,role:"morador"});setPage("facial");return null;
+    if(m.inadimplente)return"Votacao bloqueada: pendencias financeiras.";
+    if(votos.find(v=>v.unidade===m.unidade&&!v.procurador))return"Sua unidade ja votou.";
+    setMoradorUser({...m,role:"morador"});setPage("facial");return null;
   };
 
-  const registrar=d=>{dbPush("votos",{...d,foto:fotoVotante||null,ts:new Date().toLocaleTimeString("pt-BR")});setFotoVotante(null);setUser(null);setPage("login");};
+  const registrar=d=>{
+    dbPush(uid,"votos",{...d,foto:fotoVotante||null,ts:new Date().toLocaleTimeString("pt-BR")});
+    setFotoVotante(null);setMoradorUser(null);setPage("inicio");
+  };
 
-  if(!fbOk)return(<div style={{...S.page,flexDirection:"column",gap:12,textAlign:"center"}}><div style={{fontSize:48}}>🗳️</div><p style={{color:"#6b7280"}}>Conectando...</p></div>);
+  const logout=()=>{window.__signOut(window.__auth);setPage("inicio");};
 
-  if(page==="login")    return <Login    cond={cond} vot={vot} onLogin={login} onRes={()=>setPage("resultado")}/>;
-  if(page==="admin")    return <Admin    conds={conds} enq={enq} lista={lista} votos={votos} vot={vot} cond={cond} onLogout={()=>{setUser(null);setPage("login");}} onRes={()=>setPage("resultado")}/>;
-  if(page==="facial")   return <Facial   user={user} onOk={foto=>{setFotoVotante(foto);setPage("votar");}} onCancel={()=>{setUser(null);setPage("login");}}/>;
-  if(page==="votar")    return <Votar    user={user} enq={enq} cond={cond} lista={lista} votos={votos} vot={vot} onVotar={registrar} onCancel={()=>{setUser(null);setPage("login");}}/>;
-  if(page==="resultado")return <Resultado votos={votos} enq={enq} cond={cond} lista={lista} vot={vot} onBack={()=>setPage(user?.role==="admin"?"admin":"login")}/>;
+  if(!fbOk||authLoading)return(<div style={{...S.page,flexDirection:"column",gap:12,textAlign:"center"}}><div style={{fontSize:48}}>🗳️</div><p style={{color:"#6b7280"}}>Carregando...</p></div>);
+
+  if(page==="inicio")    return <Inicio    cond={cond} vot={vot} onMorador={()=>setPage("votar-login")} onAdmin={()=>setPage("admin-login")} onRes={()=>setPage("resultado")}/>;
+  if(page==="admin-login")return <AdminLogin onVoltar={()=>setPage("inicio")}/>;
+  if(page==="votar-login")return <MoradorLogin cond={cond} vot={vot} lista={lista} votos={votos} onLogin={loginMorador} onVoltar={()=>setPage("inicio")} onRes={()=>setPage("resultado")}/>;
+  if(page==="admin")     return <Admin uid={uid} conds={conds} enq={enq} lista={lista} votos={votos} vot={vot} cond={cond} onLogout={logout} onRes={()=>setPage("resultado")}/>;
+  if(page==="facial")    return <Facial user={moradorUser} onOk={foto=>{setFotoVotante(foto);setPage("votando");}} onCancel={()=>{setMoradorUser(null);setPage("inicio");}}/>;
+  if(page==="votando")   return <Votar user={moradorUser} enq={enq} cond={cond} lista={lista} votos={votos} vot={vot} onVotar={registrar} onCancel={()=>{setMoradorUser(null);setPage("inicio");}}/>;
+  if(page==="resultado") return <Resultado votos={votos} enq={enq} cond={cond} lista={lista} vot={vot} onBack={()=>setPage(authUser?"admin":"inicio")}/>;
   return null;
 }
 
-/* ══ LOGIN ══ */
-function Login({cond,vot,onLogin,onRes}){
-  const[cpf,setCpf]=useState("");const[pw,setPw]=useState("");const[err,setErr]=useState("");const[role,setRole]=useState("morador");
-  const go=()=>{const e=onLogin(dig(cpf),pw);if(e)setErr(e);};
+/* ═══ TELA INICIAL ═══ */
+function Inicio({cond,vot,onMorador,onAdmin,onRes}){
   const stC=!vot||vot.status==="aguardando"?"#d97706":vot.status==="encerrada"?"#dc2626":"#16a34a";
   const stL=!vot||vot.status==="aguardando"?"Aguardando":vot.status==="encerrada"?"Encerrada":"Aberta";
   return(
-    <div style={S.page}><div style={{...S.card,width:"100%",maxWidth:400}}>
-      <div style={{textAlign:"center",marginBottom:20}}>
-        <div style={{fontSize:44,marginBottom:4}}>🗳️</div>
-        <h1 style={{fontWeight:700,fontSize:22,color:"#1e3a5f"}}>Urna Digital</h1>
-        {cond&&<p style={{fontSize:14,color:"#6b7280",marginTop:4,fontWeight:500}}>{cond.nome}</p>}
-        <div style={{display:"inline-flex",alignItems:"center",gap:6,marginTop:8,background:"#f9fafb",padding:"4px 12px",borderRadius:99,border:"1px solid #e5e7eb"}}>
+    <div style={S.page}><div style={{...S.card,width:"100%",maxWidth:420}}>
+      <div style={{textAlign:"center",marginBottom:24}}>
+        <div style={{fontSize:52,marginBottom:8}}>🗳️</div>
+        <h1 style={{fontWeight:700,fontSize:24,color:"#1e3a5f"}}>Urna Digital</h1>
+        <p style={{fontSize:13,color:"#6b7280",marginTop:4}}>Sistema de votacao para assembleias</p>
+        {cond&&<p style={{fontSize:15,color:"#1e3a5f",marginTop:8,fontWeight:600}}>{cond.nome}</p>}
+        <div style={{display:"inline-flex",alignItems:"center",gap:6,marginTop:8,background:"#f9fafb",padding:"4px 14px",borderRadius:99,border:"1px solid #e5e7eb"}}>
           <span style={{width:8,height:8,borderRadius:"50%",background:stC,display:"inline-block"}}></span>
           <span style={{fontSize:13,fontWeight:600,color:stC}}>Votacao: {stL}</span>
         </div>
       </div>
-      {vot?.status==="aberta"&&<div style={{background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:10,padding:14,marginBottom:14}}><Crono vot={vot} big/></div>}
-      {vot?.status==="encerrada"&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:10,padding:12,marginBottom:14,textAlign:"center"}}>
-        <p style={{color:"#991b1b",fontWeight:600,fontSize:14}}>🔒 Votacao encerrada</p>
+      {vot?.status==="aberta"&&<div style={{background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:10,padding:14,marginBottom:20}}><Crono vot={vot} big/></div>}
+      {vot?.status==="encerrada"&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:10,padding:12,marginBottom:20,textAlign:"center"}}>
+        <p style={{color:"#991b1b",fontWeight:600}}>🔒 Votacao encerrada</p>
         <button onClick={onRes} style={{background:"none",border:"none",color:"#1d4ed8",cursor:"pointer",fontSize:13,marginTop:4}}>Ver resultado →</button>
       </div>}
-      <div style={{display:"flex",gap:8,marginBottom:16}}>
-        <button onClick={()=>setRole("morador")} style={{flex:1,padding:"8px",borderRadius:8,border:role==="morador"?"2px solid #1d4ed8":"1px solid #d1d5db",background:role==="morador"?"#eff6ff":"#fff",color:role==="morador"?"#1d4ed8":"#6b7280",fontWeight:600,cursor:"pointer",fontSize:13}}>👤 Morador</button>
-        <button onClick={()=>setRole("admin")} style={{flex:1,padding:"8px",borderRadius:8,border:role==="admin"?"2px solid #1e3a5f":"1px solid #d1d5db",background:role==="admin"?"#1e3a5f":"#fff",color:role==="admin"?"#fff":"#6b7280",fontWeight:600,cursor:"pointer",fontSize:13}}>🔐 Administrador</button>
+      <div style={{display:"flex",flexDirection:"column",gap:10}}>
+        <button onClick={onMorador} style={{...S.btn("#1d4ed8"),padding:"14px",fontSize:16}}>🗳️ Sou Morador — Quero Votar</button>
+        <button onClick={onAdmin} style={{...S.btn("#1e3a5f"),padding:"14px",fontSize:16}}>🔐 Sou Administradora</button>
+        <button onClick={onRes} style={{...S.btnO,fontSize:13}}>📊 Ver resultado publico</button>
       </div>
-      {err&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:8,padding:"10px 12px",marginBottom:12,fontSize:13,color:"#991b1b"}}>{err}</div>}
-      <div style={{marginBottom:10}}><label style={S.lbl}>CPF</label><input style={S.inp} placeholder="000.000.000-00" value={fmtCPF(cpf)} onChange={e=>setCpf(e.target.value)}/></div>
-      <div style={{marginBottom:16}}><label style={S.lbl}>Senha</label><input type="password" style={S.inp} placeholder={role==="morador"?"Senha enviada pela administracao":"Senha do administrador"} value={pw} onChange={e=>setPw(e.target.value)} onKeyDown={e=>e.key==="Enter"&&go()}/></div>
-      <button onClick={go} style={S.btn(role==="admin"?"#1e3a5f":"#1d4ed8")}>{role==="admin"?"🔐 Entrar como Administrador":"🗳️ Entrar para Votar"}</button>
-      <button onClick={onRes} style={{...S.btnO,marginTop:8,fontSize:13}}>📊 Ver resultado publico</button>
-      {role==="morador"&&<div style={{marginTop:14,background:"#f0f9ff",borderRadius:8,padding:10,fontSize:12,color:"#0369a1"}}><strong>Como votar?</strong><br/>Digite seu CPF e a senha enviada pela administracao.</div>}
     </div></div>
   );
 }
 
-/* ══ FACIAL ══ */
+/* ═══ LOGIN ADMINISTRADORA ═══ */
+function AdminLogin({onVoltar}){
+  const[modo,setModo]=useState("login"); // login | cadastro
+  const[email,setEmail]=useState("");const[pw,setPw]=useState("");const[pw2,setPw2]=useState("");
+  const[nome,setNome]=useState("");const[err,setErr]=useState("");const[loading,setLoading]=useState(false);
+
+  const entrar=async()=>{
+    setErr("");setLoading(true);
+    try{await window.__signIn(window.__auth,email,pw);}
+    catch(e){setErr(e.code==="auth/invalid-credential"?"Email ou senha incorretos.":e.code==="auth/user-not-found"?"Conta nao encontrada.":e.message);}
+    setLoading(false);
+  };
+
+  const cadastrar=async()=>{
+    if(!nome.trim()){setErr("Digite seu nome.");return;}
+    if(pw!==pw2){setErr("As senhas nao coincidem.");return;}
+    if(pw.length<6){setErr("A senha deve ter pelo menos 6 caracteres.");return;}
+    setErr("");setLoading(true);
+    try{
+      const cred=await window.__createUser(window.__auth,email,pw);
+      const uid=cred.user.uid;
+      dbSet(uid,"perfil",{nome,email,criadoEm:Date.now()});
+      dbSet(uid,"conds",[{id:1,nome:"Meu Condominio",ativo:true}]);
+      dbSet(uid,"vot",{status:"aguardando",inicioTs:null,fimTs:null,duracaoSeg:600});
+    }
+    catch(e){setErr(e.code==="auth/email-already-in-use"?"Este email ja possui uma conta.":e.message);}
+    setLoading(false);
+  };
+
+  return(
+    <div style={S.page}><div style={{...S.card,width:"100%",maxWidth:420}}>
+      <div style={{textAlign:"center",marginBottom:20}}>
+        <div style={{fontSize:40,marginBottom:4}}>🔐</div>
+        <h2 style={{fontWeight:700,fontSize:20,color:"#1e3a5f"}}>{modo==="login"?"Acesso Administradora":"Criar Conta"}</h2>
+        <p style={{fontSize:13,color:"#6b7280",marginTop:4}}>Cada administradora tem seus proprios dados</p>
+      </div>
+      <div style={{display:"flex",gap:8,marginBottom:18}}>
+        <button onClick={()=>{setModo("login");setErr("");}} style={{flex:1,padding:"8px",borderRadius:8,border:modo==="login"?"2px solid #1e3a5f":"1px solid #d1d5db",background:modo==="login"?"#1e3a5f":"#fff",color:modo==="login"?"#fff":"#6b7280",fontWeight:600,cursor:"pointer",fontSize:13}}>Entrar</button>
+        <button onClick={()=>{setModo("cadastro");setErr("");}} style={{flex:1,padding:"8px",borderRadius:8,border:modo==="cadastro"?"2px solid #1d4ed8":"1px solid #d1d5db",background:modo==="cadastro"?"#eff6ff":"#fff",color:modo==="cadastro"?"#1d4ed8":"#6b7280",fontWeight:600,cursor:"pointer",fontSize:13}}>Criar conta</button>
+      </div>
+      {err&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:8,padding:"10px 12px",marginBottom:12,fontSize:13,color:"#991b1b"}}>{err}</div>}
+      {modo==="cadastro"&&<div style={{marginBottom:10}}><label style={S.lbl}>Nome da administradora / empresa</label><input style={S.inp} placeholder="Ex: Safirapiaui Administracao" value={nome} onChange={e=>setNome(e.target.value)}/></div>}
+      <div style={{marginBottom:10}}><label style={S.lbl}>Email</label><input type="email" style={S.inp} placeholder="seu@email.com" value={email} onChange={e=>setEmail(e.target.value)}/></div>
+      <div style={{marginBottom:modo==="cadastro"?10:16}}><label style={S.lbl}>Senha</label><input type="password" style={S.inp} placeholder={modo==="cadastro"?"Minimo 6 caracteres":"Sua senha"} value={pw} onChange={e=>setPw(e.target.value)} onKeyDown={e=>e.key==="Enter"&&modo==="login"&&entrar()}/></div>
+      {modo==="cadastro"&&<div style={{marginBottom:16}}><label style={S.lbl}>Confirmar senha</label><input type="password" style={S.inp} placeholder="Repita a senha" value={pw2} onChange={e=>setPw2(e.target.value)}/></div>}
+      <button onClick={modo==="login"?entrar:cadastrar} disabled={loading} style={S.btn(loading?"#9ca3af":"#1e3a5f")}>{loading?"Aguarde...":(modo==="login"?"Entrar":"Criar minha conta")}</button>
+      <button onClick={onVoltar} style={{...S.btnO,marginTop:8,fontSize:13}}>← Voltar</button>
+      {modo==="cadastro"&&<div style={{marginTop:14,background:"#f0fdf4",borderRadius:8,padding:10,fontSize:12,color:"#15803d"}}><strong>✅ Seus dados sao privados!</strong><br/>Cada administradora acessa apenas seus proprios condominios, listas e votacoes.</div>}
+    </div></div>
+  );
+}
+
+/* ═══ LOGIN MORADOR ═══ */
+function MoradorLogin({cond,vot,lista,votos,onLogin,onVoltar,onRes}){
+  const[cpf,setCpf]=useState("");const[pw,setPw]=useState("");const[err,setErr]=useState("");
+  const stC=!vot||vot.status==="aguardando"?"#d97706":vot.status==="encerrada"?"#dc2626":"#16a34a";
+  const stL=!vot||vot.status==="aguardando"?"Aguardando":vot.status==="encerrada"?"Encerrada":"Aberta";
+  const go=()=>{const e=onLogin(dig(cpf),pw);if(e)setErr(e);};
+  return(
+    <div style={S.page}><div style={{...S.card,width:"100%",maxWidth:400}}>
+      <div style={{textAlign:"center",marginBottom:18}}>
+        <div style={{fontSize:40,marginBottom:4}}>👤</div>
+        <h2 style={{fontWeight:700,fontSize:20,color:"#1e3a5f"}}>Area do Morador</h2>
+        {cond&&<p style={{fontSize:14,color:"#1e3a5f",marginTop:4,fontWeight:600}}>{cond.nome}</p>}
+        <div style={{display:"inline-flex",alignItems:"center",gap:6,marginTop:6,background:"#f9fafb",padding:"3px 12px",borderRadius:99,border:"1px solid #e5e7eb"}}>
+          <span style={{width:7,height:7,borderRadius:"50%",background:stC,display:"inline-block"}}></span>
+          <span style={{fontSize:12,fontWeight:600,color:stC}}>{stL}</span>
+        </div>
+      </div>
+      {vot?.status==="aberta"&&<div style={{background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:10,padding:12,marginBottom:14}}><Crono vot={vot} big/></div>}
+      {vot?.status==="encerrada"&&<div style={{background:"#fef2f2",borderRadius:8,padding:10,marginBottom:14,textAlign:"center"}}>
+        <p style={{color:"#991b1b",fontWeight:600,fontSize:13}}>🔒 Votacao encerrada</p>
+        <button onClick={onRes} style={{background:"none",border:"none",color:"#1d4ed8",cursor:"pointer",fontSize:12,marginTop:2}}>Ver resultado →</button>
+      </div>}
+      {err&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:8,padding:"10px 12px",marginBottom:12,fontSize:13,color:"#991b1b"}}>{err}</div>}
+      <div style={{marginBottom:10}}><label style={S.lbl}>CPF</label><input style={S.inp} placeholder="000.000.000-00" value={fmtCPF(cpf)} onChange={e=>setCpf(e.target.value)}/></div>
+      <div style={{marginBottom:14}}><label style={S.lbl}>Senha</label><input type="password" style={S.inp} placeholder="Senha enviada pela administracao" value={pw} onChange={e=>setPw(e.target.value)} onKeyDown={e=>e.key==="Enter"&&go()}/></div>
+      <button onClick={go} style={S.btn("#1d4ed8")}>🗳️ Entrar para Votar</button>
+      <button onClick={onVoltar} style={{...S.btnO,marginTop:8,fontSize:13}}>← Voltar</button>
+      <div style={{marginTop:14,background:"#f0f9ff",borderRadius:8,padding:10,fontSize:12,color:"#0369a1"}}><strong>Como votar?</strong><br/>Digite seu CPF e a senha enviada pela administracao do condominio.</div>
+    </div></div>
+  );
+}
+
+/* ═══ FACIAL ═══ */
 function Facial({user,onOk,onCancel}){
   const vRef=useRef();const cRef=useRef();const stRef=useRef(null);
   const[foto,setFoto]=useState(null);const[semCam,setSemCam]=useState(false);
@@ -185,12 +288,12 @@ function Facial({user,onOk,onCancel}){
     <div style={S.page}><div style={{...S.card,width:"100%",maxWidth:420}}>
       <h2 style={{fontWeight:700,textAlign:"center",fontSize:20,color:"#1e3a5f",marginBottom:4}}>Identificacao Facial</h2>
       <p style={{textAlign:"center",color:"#6b7280",fontSize:13,marginBottom:4}}>Ola, <strong>{user.nome}</strong> — Unidade {user.unidade}</p>
-      <p style={{textAlign:"center",color:"#9ca3af",fontSize:12,marginBottom:14}}>Sua foto sera registrada junto ao voto para auditoria</p>
+      <p style={{textAlign:"center",color:"#9ca3af",fontSize:12,marginBottom:14}}>Foto registrada para auditoria</p>
       {semCam&&<div style={{...S.badge(false),display:"block",textAlign:"center",padding:"8px",marginBottom:12}}>Camera nao disponivel</div>}
-      <div style={{background:"#f3f4f6",borderRadius:10,overflow:"hidden",marginBottom:14,aspectRatio:"4/3",display:"flex",alignItems:"center",justifyContent:"center",position:"relative"}}>
+      <div style={{background:"#f3f4f6",borderRadius:10,overflow:"hidden",marginBottom:14,aspectRatio:"4/3",position:"relative",display:"flex",alignItems:"center",justifyContent:"center"}}>
         {!foto?<video ref={vRef} autoPlay playsInline muted style={{width:"100%",height:"100%",objectFit:"cover"}}/>:<img src={foto} alt="foto" style={{width:"100%",height:"100%",objectFit:"cover"}}/>}
         {!foto&&!semCam&&<div style={{position:"absolute",inset:18,border:"2px dashed #3b82f6",borderRadius:10,pointerEvents:"none"}}/>}
-        {foto&&<div style={{position:"absolute",top:8,right:8,background:"#15803d",color:"#fff",borderRadius:99,padding:"2px 8px",fontSize:12,fontWeight:600}}>✅ Foto capturada</div>}
+        {foto&&<div style={{position:"absolute",top:8,right:8,background:"#15803d",color:"#fff",borderRadius:99,padding:"2px 8px",fontSize:12,fontWeight:600}}>✅ Capturada</div>}
       </div>
       <canvas ref={cRef} style={{display:"none"}}/>
       <div style={{display:"flex",flexDirection:"column",gap:8}}>
@@ -202,7 +305,7 @@ function Facial({user,onOk,onCancel}){
   );
 }
 
-/* ══ VOTAR ══ */
+/* ═══ VOTAR ═══ */
 function Votar({user,enq,cond,lista,votos,vot,onVotar,onCancel}){
   const[proc,setProc]=useState(false);const[urep,setUrep]=useState("");const[conf,setConf]=useState(null);const[err,setErr]=useState("");
   useEffect(()=>{if(vot&&vot.status==="encerrada")onCancel();},[vot?.status]);
@@ -216,10 +319,7 @@ function Votar({user,enq,cond,lista,votos,vot,onVotar,onCancel}){
       <p style={{fontSize:13,color:"#6b7280",marginBottom:10}}>{enq?.tema}</p>
       <p style={{fontSize:28,fontWeight:700,color:clr[conf],marginBottom:14}}>{conf}</p>
       {proc&&<p style={{fontSize:13,color:"#1d4ed8",marginBottom:14}}>Procurador da unidade {urep}</p>}
-      <div style={{display:"flex",gap:8}}>
-        <button onClick={()=>setConf(null)} style={{...S.btnO,flex:1}}>Voltar</button>
-        <button onClick={()=>onVotar({unidade:user.unidade,nome:user.nome,cpf:user.cpf,voto:conf,procurador:proc,unidadeRep:proc?urep:""})} style={{...S.btn("#1d4ed8"),flex:1}}>Confirmar</button>
-      </div>
+      <div style={{display:"flex",gap:8}}><button onClick={()=>setConf(null)} style={{...S.btnO,flex:1}}>Voltar</button><button onClick={()=>onVotar({unidade:user.unidade,nome:user.nome,cpf:user.cpf,voto:conf,procurador:proc,unidadeRep:proc?urep:""})} style={{...S.btn("#1d4ed8"),flex:1}}>Confirmar</button></div>
     </div></div>
   );
   return(
@@ -236,7 +336,7 @@ function Votar({user,enq,cond,lista,votos,vot,onVotar,onCancel}){
       </div>
       <div style={{marginBottom:14}}>
         <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:14,marginBottom:proc?8:0}}><input type="checkbox" checked={proc} onChange={e=>setProc(e.target.checked)}/> Sou procurador de outra unidade</label>
-        {proc&&<select style={S.inp} value={urep} onChange={e=>setUrep(e.target.value)}><option value="">Selecione a unidade...</option>{disp.map(m=><option key={m.unidade} value={m.unidade}>Unidade {m.unidade} — {m.nome}</option>)}</select>}
+        {proc&&<select style={S.inp} value={urep} onChange={e=>setUrep(e.target.value)}><option value="">Selecione...</option>{disp.map(m=><option key={m.unidade} value={m.unidade}>Unidade {m.unidade} — {m.nome}</option>)}</select>}
         {err&&<p style={{color:"#dc2626",fontSize:13,marginTop:4}}>{err}</p>}
       </div>
       <p style={{textAlign:"center",fontSize:13,color:"#6b7280",marginBottom:10}}>Selecione seu voto:</p>
@@ -250,16 +350,20 @@ function Votar({user,enq,cond,lista,votos,vot,onVotar,onCancel}){
   );
 }
 
-/* ══ ADMIN ══ */
-function Admin({conds,enq,lista,votos,vot,cond,onLogout,onRes}){
+/* ═══ ADMIN PAINEL ═══ */
+function Admin({uid,conds,enq,lista,votos,vot,cond,onLogout,onRes}){
   const[tab,setTab]=useState("dash");
-  const tabs=[["dash","📊 Dashboard"],["enq","📋 Enquete"],["lista","👥 Lista"],["conds","🏢 Condominios"],["votos","🗳️ Votos"],["relatorio","📄 Relatorio PDF"]];
+  const perfil=useDB(uid,"perfil",{nome:"Administradora"});
+  const tabs=[["dash","📊 Dashboard"],["enq","📋 Enquete"],["lista","👥 Lista"],["conds","🏢 Condominios"],["votos","🗳️ Votos"],["relatorio","📄 Relatorio"]];
   return(
     <div style={{minHeight:"100vh",background:"#f0f4f8"}}>
       <header style={{background:"#1e3a5f",padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
         <div style={{display:"flex",alignItems:"center",gap:10}}>
           <span style={{fontSize:22}}>🗳️</span>
-          <div><p style={{fontWeight:700,fontSize:15,color:"#fff",lineHeight:1}}>Urna Digital</p><p style={{fontSize:11,color:"#93c5fd"}}>Painel Administrativo</p></div>
+          <div>
+            <p style={{fontWeight:700,fontSize:15,color:"#fff",lineHeight:1}}>Urna Digital</p>
+            <p style={{fontSize:11,color:"#93c5fd"}}>{perfil?.nome||"Administradora"}</p>
+          </div>
         </div>
         <div style={{display:"flex",alignItems:"center",gap:10}}>
           <Crono vot={vot}/>
@@ -271,25 +375,24 @@ function Admin({conds,enq,lista,votos,vot,cond,onLogout,onRes}){
         {tabs.map(([k,l])=>(<button key={k} onClick={()=>setTab(k)} style={{padding:"11px 14px",border:"none",borderBottom:tab===k?"2px solid #1d4ed8":"2px solid transparent",background:"transparent",cursor:"pointer",whiteSpace:"nowrap",fontSize:13,fontWeight:tab===k?700:400,color:tab===k?"#1d4ed8":"#6b7280"}}>{l}</button>))}
       </nav>
       <div style={{padding:16,maxWidth:900,margin:"0 auto"}}>
-        {tab==="dash"      &&<Dash      cond={cond} lista={lista} votos={votos} enq={enq} vot={vot} onRes={onRes}/>}
-        {tab==="enq"       &&<TabEnq    enq={enq} conds={conds} vot={vot}/>}
-        {tab==="lista"     &&<TabLista  lista={lista}/>}
-        {tab==="conds"     &&<TabConds  conds={conds}/>}
-        {tab==="votos"     &&<TabVotos  votos={votos}/>}
+        {tab==="dash"      &&<Dash      uid={uid} cond={cond} lista={lista} votos={votos} enq={enq} vot={vot} onRes={onRes}/>}
+        {tab==="enq"       &&<TabEnq    uid={uid} enq={enq} conds={conds} vot={vot}/>}
+        {tab==="lista"     &&<TabLista  uid={uid} lista={lista}/>}
+        {tab==="conds"     &&<TabConds  uid={uid} conds={conds}/>}
+        {tab==="votos"     &&<TabVotos  uid={uid} votos={votos}/>}
         {tab==="relatorio" &&<TabRelatorio votos={votos} enq={enq} cond={cond} lista={lista} vot={vot}/>}
       </div>
     </div>
   );
 }
 
-/* ══ DASHBOARD ══ */
-function Dash({cond,lista,votos,enq,vot,onRes}){
+function Dash({uid,cond,lista,votos,enq,vot,onRes}){
   const aptos=lista.filter(m=>!m.inadimplente).length;
   const votaram=new Set(votos.map(v=>v.unidade)).size;
   const ap=votos.filter(v=>v.voto==="Aprovado").length,rp=votos.filter(v=>v.voto==="Reprovado").length,ab=votos.filter(v=>v.voto==="Abstencao").length;
-  const iniciar=()=>dbSet("vot",{status:"aberta",inicioTs:Date.now(),fimTs:null,duracaoSeg:(enq?.duracaoMin||10)*60});
-  const encerrar=()=>dbSet("vot",{...vot,status:"encerrada",fimTs:Date.now()});
-  const reiniciar=()=>{dbSet("vot",{status:"aguardando",inicioTs:null,fimTs:null,duracaoSeg:600});dbSet("votos",null);};
+  const iniciar=()=>dbSet(uid,"vot",{status:"aberta",inicioTs:Date.now(),fimTs:null,duracaoSeg:(enq?.duracaoMin||10)*60});
+  const encerrar=()=>dbSet(uid,"vot",{...vot,status:"encerrada",fimTs:Date.now()});
+  const reiniciar=()=>{dbSet(uid,"vot",{status:"aguardando",inicioTs:null,fimTs:null,duracaoSeg:600});dbSet(uid,"votos",null);};
   return(
     <div style={{display:"flex",flexDirection:"column",gap:14}}>
       <div style={S.card}>
@@ -318,35 +421,34 @@ function Dash({cond,lista,votos,enq,vot,onRes}){
   );
 }
 
-function TabEnq({enq,conds,vot}){
+function TabEnq({uid,enq,conds,vot}){
   const[f,setF]=useState(enq||{});
   useEffect(()=>{if(enq)setF(enq);},[JSON.stringify(enq)]);
   const lock=vot?.status==="aberta";
   return(
     <div style={S.card}>
       <h3 style={{fontWeight:700,marginBottom:14,color:"#1e3a5f"}}>⚙️ Configurar Enquete</h3>
-      {lock&&<div style={{background:"#fef9c3",color:"#854d0e",padding:"8px 12px",borderRadius:8,marginBottom:14,fontSize:13}}>⚠️ Votacao em andamento. Encerre para editar.</div>}
+      {lock&&<div style={{background:"#fef9c3",color:"#854d0e",padding:"8px 12px",borderRadius:8,marginBottom:14,fontSize:13}}>⚠️ Encerre a votacao para editar.</div>}
       <div style={{marginBottom:12}}><label style={S.lbl}>Condominio</label>
         <select disabled={lock} style={S.inp} value={f.condominioId||""} onChange={e=>setF(p=>({...p,condominioId:+e.target.value}))}>
           {conds.map((c,i)=><option key={c.id||i} value={c.id||i}>{c.nome}</option>)}
         </select>
       </div>
       <div style={{marginBottom:12}}><label style={S.lbl}>Tema / Pauta</label><input disabled={lock} style={S.inp} value={f.tema||""} onChange={e=>setF(p=>({...p,tema:e.target.value}))} placeholder="Ex: Aprovacao do fundo de reserva 2025"/></div>
-      <div style={{marginBottom:12}}><label style={S.lbl}>Descricao</label><textarea disabled={lock} rows={3} style={{...S.inp,resize:"vertical"}} value={f.descricao||""} onChange={e=>setF(p=>({...p,descricao:e.target.value}))} placeholder="Detalhes..."/></div>
+      <div style={{marginBottom:12}}><label style={S.lbl}>Descricao</label><textarea disabled={lock} rows={3} style={{...S.inp,resize:"vertical"}} value={f.descricao||""} onChange={e=>setF(p=>({...p,descricao:e.target.value}))}/></div>
       <div style={{marginBottom:14}}><label style={S.lbl}>Duracao (minutos)</label><input disabled={lock} type="number" min={1} max={180} style={S.inp} value={f.duracaoMin||10} onChange={e=>setF(p=>({...p,duracaoMin:+e.target.value}))}/></div>
-      <button disabled={lock} onClick={()=>dbSet("enq",f)} style={S.btn(lock?"#9ca3af":"#1d4ed8")}>💾 Salvar Enquete</button>
+      <button disabled={lock} onClick={()=>dbSet(uid,"enq",f)} style={S.btn(lock?"#9ca3af":"#1d4ed8")}>💾 Salvar</button>
     </div>
   );
 }
 
-function TabLista({lista}){
-  const[modo,setModo]=useState("ver");
-  const[form,setForm]=useState({unidade:"",nome:"",cpf:"",senha:"",inadimplente:false});
+function TabLista({uid,lista}){
+  const[modo,setModo]=useState("ver");const[form,setForm]=useState({unidade:"",nome:"",cpf:"",senha:"",inadimplente:false});
   const[editI,setEditI]=useState(null);const[formEdit,setFormEdit]=useState({});const[busca,setBusca]=useState("");
   const fRef=useRef();
   const adicionar=()=>{
     if(!form.unidade.trim()||!form.nome.trim()||!form.cpf.trim()||!form.senha.trim()){alert("Preencha todos os campos.");return;}
-    dbSet("lista/"+lista.length,{...form,cpf:dig(form.cpf)});
+    dbSet(uid,"lista/"+lista.length,{...form,cpf:dig(form.cpf)});
     setForm({unidade:"",nome:"",cpf:"",senha:"",inadimplente:false});setModo("ver");
   };
   const imp=async e=>{
@@ -354,15 +456,15 @@ function TabLista({lista}){
     const buf=await file.arrayBuffer();const wb=window.XLSX.read(buf);
     const rows=window.XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:""});
     const obj={};rows.forEach((r,i)=>{obj[i]={unidade:String(r.unidade||r.Unidade||""),nome:String(r.nome||r.Nome||""),cpf:dig(String(r.cpf||r.CPF||"")),senha:String(r.senha||r.Senha||"1234"),inadimplente:String(r.inadimplente||r.Inadimplente||"").toLowerCase()==="sim"};});
-    dbSet("lista",obj);e.target.value="";alert("Lista importada: "+rows.length+" moradores.");setModo("ver");
+    dbSet(uid,"lista",obj);e.target.value="";alert("Lista importada: "+rows.length+" moradores.");setModo("ver");
   };
-  const baixarModelo=()=>{if(!window.XLSX)return;const ws=window.XLSX.utils.aoa_to_sheet([["unidade","nome","cpf","senha","inadimplente"],["101","Carlos Silva","11111111111","1234","nao"],["102","Maria Souza","22222222222","1234","sim"]]);const wb=window.XLSX.utils.book_new();window.XLSX.utils.book_append_sheet(wb,ws,"Lista");window.XLSX.writeFile(wb,"modelo_lista_chamada.xlsx");};
+  const baixarModelo=()=>{if(!window.XLSX)return;const ws=window.XLSX.utils.aoa_to_sheet([["unidade","nome","cpf","senha","inadimplente"],["101","Carlos Silva","11111111111","1234","nao"],["102","Maria Souza","22222222222","1234","sim"]]);const wb=window.XLSX.utils.book_new();window.XLSX.utils.book_append_sheet(wb,ws,"Lista");window.XLSX.writeFile(wb,"modelo_lista.xlsx");};
   const filtrada=lista.filter(m=>!busca||m.nome.toLowerCase().includes(busca.toLowerCase())||m.unidade.includes(busca)||fmtCPF(m.cpf).includes(busca));
   return(
     <div style={{display:"flex",flexDirection:"column",gap:12}}>
       <div style={S.card}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,flexWrap:"wrap",gap:8}}>
-          <div><h3 style={{fontWeight:700,color:"#1e3a5f"}}>👥 Lista de Chamada</h3><p style={{fontSize:12,color:"#9ca3af",marginTop:2}}>{lista.length} moradores</p></div>
+          <div><h3 style={{fontWeight:700,color:"#1e3a5f"}}>👥 Lista de Chamada</h3><p style={{fontSize:12,color:"#9ca3af"}}>{lista.length} moradores</p></div>
           <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
             <button onClick={()=>setModo(modo==="manual"?"ver":"manual")} style={{...S.btn(modo==="manual"?"#15803d":"#1d4ed8"),width:"auto",padding:"7px 12px",fontSize:12}}>➕ Adicionar</button>
             <button onClick={()=>fRef.current.click()} style={{...S.btn("#6366f1"),width:"auto",padding:"7px 12px",fontSize:12}}>📂 Importar Excel</button>
@@ -383,7 +485,7 @@ function TabLista({lista}){
             <div style={{display:"flex",gap:8}}><button onClick={adicionar} style={{...S.btn("#15803d"),flex:1}}>✅ Salvar</button><button onClick={()=>setModo("ver")} style={{...S.btnO,flex:1}}>Cancelar</button></div>
           </div>
         )}
-        <div style={{marginBottom:12}}><input style={S.inp} placeholder="🔍 Buscar por nome, unidade ou CPF..." value={busca} onChange={e=>setBusca(e.target.value)}/></div>
+        <div style={{marginBottom:12}}><input style={S.inp} placeholder="🔍 Buscar..." value={busca} onChange={e=>setBusca(e.target.value)}/></div>
         <div style={{overflowX:"auto"}}>
           <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
             <thead><tr style={{background:"#f9fafb"}}>{["Unidade","Nome","CPF","Senha","Status",""].map(h=><th key={h} style={{padding:"8px 10px",textAlign:"left",fontWeight:600,fontSize:12,color:"#6b7280",borderBottom:"1px solid #e5e7eb"}}>{h}</th>)}</tr></thead>
@@ -393,10 +495,10 @@ function TabLista({lista}){
                 <td style={{padding:"8px 10px"}}>{m.nome}</td>
                 <td style={{padding:"8px 10px",color:"#9ca3af",fontSize:12}}>{fmtCPF(m.cpf)}</td>
                 <td style={{padding:"8px 10px",fontFamily:"monospace",color:"#6b7280"}}>{m.senha}</td>
-                <td style={{padding:"8px 10px"}}><button onClick={()=>dbSet("lista/"+i,{...m,inadimplente:!m.inadimplente})} style={{...S.badge(!m.inadimplente),cursor:"pointer",border:"none"}}>{m.inadimplente?"Inadimplente":"Regular"}</button></td>
+                <td style={{padding:"8px 10px"}}><button onClick={()=>dbSet(uid,"lista/"+i,{...m,inadimplente:!m.inadimplente})} style={{...S.badge(!m.inadimplente),cursor:"pointer",border:"none"}}>{m.inadimplente?"Inadimplente":"Regular"}</button></td>
                 <td style={{padding:"8px 10px",whiteSpace:"nowrap"}}>
                   <button onClick={()=>{setEditI(i);setFormEdit({...m});}} style={{background:"none",border:"none",color:"#1d4ed8",cursor:"pointer",fontSize:12,marginRight:6}}>Editar</button>
-                  <button onClick={()=>{if(confirm("Remover?"))dbDel("lista/"+i);}} style={{background:"none",border:"none",color:"#dc2626",cursor:"pointer",fontSize:12}}>Remover</button>
+                  <button onClick={()=>{if(confirm("Remover?"))dbDel(uid,"lista/"+i);}} style={{background:"none",border:"none",color:"#dc2626",cursor:"pointer",fontSize:12}}>Remover</button>
                 </td>
               </tr>
             ))}</tbody>
@@ -414,34 +516,34 @@ function TabLista({lista}){
           <div style={{marginBottom:10}}><label style={S.lbl}>Nome</label><input style={S.inp} value={formEdit.nome||""} onChange={e=>setFormEdit(p=>({...p,nome:e.target.value}))}/></div>
           <div style={{marginBottom:10}}><label style={S.lbl}>CPF</label><input style={S.inp} value={fmtCPF(formEdit.cpf||"")} onChange={e=>setFormEdit(p=>({...p,cpf:dig(e.target.value)}))}/></div>
           <label style={{display:"flex",alignItems:"center",gap:8,fontSize:14,marginBottom:12,cursor:"pointer"}}><input type="checkbox" checked={formEdit.inadimplente||false} onChange={e=>setFormEdit(p=>({...p,inadimplente:e.target.checked}))}/> Inadimplente</label>
-          <div style={{display:"flex",gap:8}}><button onClick={()=>{dbSet("lista/"+editI,formEdit);setEditI(null);}} style={{...S.btn("#1d4ed8"),flex:1}}>Salvar</button><button onClick={()=>setEditI(null)} style={{...S.btnO,flex:1}}>Cancelar</button></div>
+          <div style={{display:"flex",gap:8}}><button onClick={()=>{dbSet(uid,"lista/"+editI,formEdit);setEditI(null);}} style={{...S.btn("#1d4ed8"),flex:1}}>Salvar</button><button onClick={()=>setEditI(null)} style={{...S.btnO,flex:1}}>Cancelar</button></div>
         </div>
       )}
     </div>
   );
 }
 
-function TabConds({conds}){
+function TabConds({uid,conds}){
   const[novo,setNovo]=useState("");
   return(
     <div style={S.card}>
-      <h3 style={{fontWeight:700,marginBottom:14,color:"#1e3a5f"}}>🏢 Condominios</h3>
+      <h3 style={{fontWeight:700,marginBottom:10,color:"#1e3a5f"}}>🏢 Condominios</h3>
       <div style={{background:"#eff6ff",borderRadius:8,padding:10,marginBottom:14,fontSize:13,color:"#1e40af"}}>💡 O condominio ativo aparece na tela de login dos moradores.</div>
       <div style={{display:"flex",gap:8,marginBottom:14}}>
         <input style={{...S.inp,flex:1}} placeholder="Nome..." value={novo} onChange={e=>setNovo(e.target.value)}/>
-        <button onClick={()=>{if(!novo.trim())return;dbSet("conds",[...conds,{id:Date.now(),nome:novo.trim(),ativo:false}]);setNovo("");}} style={{...S.btn("#1d4ed8"),width:"auto",padding:"8px 16px"}}>Adicionar</button>
+        <button onClick={()=>{if(!novo.trim())return;dbSet(uid,"conds",[...conds,{id:Date.now(),nome:novo.trim(),ativo:false}]);setNovo("");}} style={{...S.btn("#1d4ed8"),width:"auto",padding:"8px 16px"}}>Adicionar</button>
       </div>
       {conds.map((c,i)=>(
         <div key={c.id||i} style={{display:"flex",alignItems:"center",justifyContent:"space-between",border:"1px solid #e5e7eb",borderRadius:8,padding:"10px 14px",marginBottom:8,background:c.ativo?"#f0fdf4":"#fff"}}>
           <div><p style={{fontWeight:600}}>{c.nome}</p>{c.ativo&&<span style={{...S.badge(true),marginTop:2}}>✅ Ativo</span>}</div>
-          {!c.ativo&&<button onClick={()=>dbSet("conds",conds.map((x,j)=>({...x,ativo:j===i})))} style={{...S.btn("#15803d"),width:"auto",padding:"6px 14px",fontSize:13}}>Ativar</button>}
+          {!c.ativo&&<button onClick={()=>dbSet(uid,"conds",conds.map((x,j)=>({...x,ativo:j===i})))} style={{...S.btn("#15803d"),width:"auto",padding:"6px 14px",fontSize:13}}>Ativar</button>}
         </div>
       ))}
     </div>
   );
 }
 
-function TabVotos({votos}){
+function TabVotos({uid,votos}){
   const[fotoModal,setFotoModal]=useState(null);
   return(
     <div style={S.card}>
@@ -463,16 +565,12 @@ function TabVotos({votos}){
           <div onClick={()=>v.foto&&setFotoModal(v)} style={{width:52,height:52,borderRadius:8,overflow:"hidden",background:"#f3f4f6",flexShrink:0,cursor:v.foto?"pointer":"default",border:"1px solid #e5e7eb",display:"flex",alignItems:"center",justifyContent:"center"}}>
             {v.foto?<img src={v.foto} alt="bio" style={{width:"100%",height:"100%",objectFit:"cover"}}/>:<span style={{fontSize:22}}>👤</span>}
           </div>
-          <div style={{flex:1}}>
-            <p style={{fontWeight:600,fontSize:14}}>{v.nome} — Unid. {v.unidade}</p>
-            {v.procurador&&<p style={{fontSize:12,color:"#1d4ed8"}}>Procurador de {v.unidadeRep}</p>}
-            <p style={{fontSize:12,color:"#9ca3af"}}>{v.ts} {v.foto?"· 📷 Com foto":"· Sem foto"}</p>
-          </div>
+          <div style={{flex:1}}><p style={{fontWeight:600,fontSize:14}}>{v.nome} — Unid. {v.unidade}</p>{v.procurador&&<p style={{fontSize:12,color:"#1d4ed8"}}>Procurador de {v.unidadeRep}</p>}<p style={{fontSize:12,color:"#9ca3af"}}>{v.ts} {v.foto?"· 📷":"· sem foto"}</p></div>
           <div style={{display:"flex",gap:8,alignItems:"center"}}>
-            <select value={v.voto} onChange={e=>dbSet("votos/"+v._key+"/voto",e.target.value)} style={{...S.inp,width:"auto",fontSize:13}}>
+            <select value={v.voto} onChange={e=>dbSet(uid,"votos/"+v._key+"/voto",e.target.value)} style={{...S.inp,width:"auto",fontSize:13}}>
               <option>Aprovado</option><option>Reprovado</option><option>Abstencao</option>
             </select>
-            <button onClick={()=>{if(confirm("Remover?"))dbDel("votos/"+v._key);}} style={{background:"none",border:"none",color:"#dc2626",cursor:"pointer",fontSize:16}}>✕</button>
+            <button onClick={()=>{if(confirm("Remover?"))dbDel(uid,"votos/"+v._key);}} style={{background:"none",border:"none",color:"#dc2626",cursor:"pointer",fontSize:16}}>✕</button>
           </div>
         </div>
       ))}
@@ -480,231 +578,59 @@ function TabVotos({votos}){
   );
 }
 
-/* ══ RELATORIO PDF ══ */
 function TabRelatorio({votos,enq,cond,lista,vot}){
-  const ap=votos.filter(v=>v.voto==="Aprovado").length;
-  const rp=votos.filter(v=>v.voto==="Reprovado").length;
-  const ab=votos.filter(v=>v.voto==="Abstencao").length;
-  const total=votos.length;
-  const aptos=lista.filter(m=>!m.inadimplente).length;
-  const votaram=new Set(votos.map(v=>v.unidade)).size;
-  const ausentes=aptos-votaram;
+  const ap=votos.filter(v=>v.voto==="Aprovado").length,rp=votos.filter(v=>v.voto==="Reprovado").length,ab=votos.filter(v=>v.voto==="Abstencao").length;
+  const total=votos.length,aptos=lista.filter(m=>!m.inadimplente).length,votaram=new Set(votos.map(v=>v.unidade)).size;
   const ven=ap>rp?"APROVADO":rp>ap?"REPROVADO":"EMPATE";
-  const dur=vot?.inicioTs&&vot?.fimTs?Math.round((vot.fimTs-vot.inicioTs)/1000):null;
   const hoje=new Date().toLocaleString("pt-BR");
-
   const gerarPDF=()=>{
     const w=window.open("","_blank");
-    const rows=votos.map(v=>`
-      <tr>
-        <td style="padding:8px;border:1px solid #ddd;text-align:center">
-          ${v.foto?`<img src="${v.foto}" style="width:60px;height:60px;object-fit:cover;border-radius:6px;display:block;margin:0 auto">`:`<div style="width:60px;height:60px;background:#f3f4f6;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:24px;margin:0 auto">👤</div>`}
-        </td>
-        <td style="padding:8px;border:1px solid #ddd">${v.unidade}</td>
-        <td style="padding:8px;border:1px solid #ddd">${v.nome}</td>
-        <td style="padding:8px;border:1px solid #ddd">${fmtCPF(v.cpf||"")}</td>
-        <td style="padding:8px;border:1px solid #ddd;text-align:center">
-          <span style="padding:3px 10px;border-radius:99px;font-size:12px;font-weight:600;background:${v.voto==="Aprovado"?"#dcfce7":v.voto==="Reprovado"?"#fee2e2":"#f3f4f6"};color:${v.voto==="Aprovado"?"#166534":v.voto==="Reprovado"?"#991b1b":"#374151"}">${v.voto}</span>
-        </td>
-        <td style="padding:8px;border:1px solid #ddd;text-align:center">${v.procurador?"Sim (Unid. "+v.unidadeRep+")":"Nao"}</td>
-        <td style="padding:8px;border:1px solid #ddd;text-align:center">${v.foto?"✅ Sim":"❌ Nao"}</td>
-        <td style="padding:8px;border:1px solid #ddd">${v.ts||"—"}</td>
-      </tr>
-    `).join("");
-
-    w.document.write(`<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-<meta charset="UTF-8"/>
-<title>Relatorio de Assembleia</title>
-<style>
-  *{box-sizing:border-box;margin:0;padding:0}
-  body{font-family:Arial,sans-serif;padding:30px;color:#111;font-size:13px}
-  h1{font-size:22px;color:#1e3a5f;margin-bottom:4px}
-  h2{font-size:15px;color:#374151;margin:20px 0 8px;border-bottom:2px solid #1d4ed8;padding-bottom:4px}
-  h3{font-size:13px;color:#6b7280;margin-bottom:12px}
-  .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;padding-bottom:16px;border-bottom:3px solid #1e3a5f}
-  .logo{font-size:32px}
-  .badge{display:inline-block;padding:4px 14px;border-radius:99px;font-size:13px;font-weight:700}
-  .verde{background:#dcfce7;color:#166534}
-  .vermelho{background:#fee2e2;color:#991b1b}
-  .cinza{background:#f3f4f6;color:#374151}
-  .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
-  .metric{background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:12px;text-align:center}
-  .metric-val{font-size:26px;font-weight:700;color:#1e3a5f}
-  .metric-lbl{font-size:11px;color:#6b7280;margin-top:2px}
-  .bar-wrap{background:#e5e7eb;border-radius:99px;height:16px;overflow:hidden;margin-bottom:4px}
-  .bar{height:100%;border-radius:99px;display:flex;align-items:center;justify-content:flex-end;padding-right:6px}
-  table{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px}
-  th{background:#1e3a5f;color:#fff;padding:10px 8px;text-align:left;font-size:11px}
-  tr:nth-child(even){background:#f9fafb}
-  .resultado-box{border:3px solid ${ven==="APROVADO"?"#166534":ven==="REPROVADO"?"#991b1b":"#374151"};border-radius:12px;padding:16px;text-align:center;margin-bottom:16px;background:${ven==="APROVADO"?"#dcfce7":ven==="REPROVADO"?"#fee2e2":"#f3f4f6"}}
-  .resultado-txt{font-size:30px;font-weight:700;color:${ven==="APROVADO"?"#166534":ven==="REPROVADO"?"#991b1b":"#374151"}}
-  .info-row{display:flex;gap:20px;margin-bottom:6px;font-size:13px}
-  .info-lbl{color:#6b7280;min-width:140px}
-  .info-val{color:#111;font-weight:600}
-  .assinatura{margin-top:40px;border-top:1px solid #ddd;padding-top:20px;display:flex;justify-content:space-around}
-  .assina-item{text-align:center}
-  .assina-linha{border-top:1px solid #111;width:200px;margin:0 auto 6px}
-  @media print{body{padding:15px}.no-print{display:none}}
-</style>
-</head>
-<body>
-<div class="header">
-  <div>
-    <div style="display:flex;align-items:center;gap:12px">
-      <div class="logo">🗳️</div>
-      <div><h1>Relatorio de Assembleia</h1><h3>${cond?.nome||"Condominio"}</h3></div>
-    </div>
-    <div style="margin-top:10px">
-      <div class="info-row"><span class="info-lbl">Data/Hora do relatorio:</span><span class="info-val">${hoje}</span></div>
-      <div class="info-row"><span class="info-lbl">Inicio da votacao:</span><span class="info-val">${fmtDate(vot?.inicioTs)}</span></div>
-      <div class="info-row"><span class="info-lbl">Encerramento:</span><span class="info-val">${fmtDate(vot?.fimTs)}</span></div>
-      <div class="info-row"><span class="info-lbl">Duracao total:</span><span class="info-val">${dur?fmtT(dur):"—"}</span></div>
-    </div>
-  </div>
-  <div style="text-align:right">
-    <span class="badge ${vot?.status==="encerrada"?"verde":"cinza"}">${vot?.status==="encerrada"?"✅ Encerrada":"Em andamento"}</span>
-  </div>
-</div>
-
-<h2>📋 Pauta da Assembleia</h2>
-<div style="background:#eff6ff;border-radius:8px;padding:14px;margin-bottom:16px">
-  <p style="font-size:16px;font-weight:700;color:#1e3a5f;margin-bottom:4px">${enq?.tema||"Nao definida"}</p>
-  ${enq?.descricao?`<p style="color:#374151;margin-top:4px">${enq.descricao}</p>`:""}
-</div>
-
+    const rows=votos.map(v=>`<tr><td style="padding:8px;border:1px solid #ddd;text-align:center">${v.foto?`<img src="${v.foto}" style="width:60px;height:60px;object-fit:cover;border-radius:6px">`:`<span style="font-size:24px">👤</span>`}</td><td style="padding:8px;border:1px solid #ddd">${v.unidade}</td><td style="padding:8px;border:1px solid #ddd">${v.nome}</td><td style="padding:8px;border:1px solid #ddd">${fmtCPF(v.cpf||"")}</td><td style="padding:8px;border:1px solid #ddd;text-align:center"><span style="padding:3px 10px;border-radius:99px;font-size:12px;font-weight:600;background:${v.voto==="Aprovado"?"#dcfce7":v.voto==="Reprovado"?"#fee2e2":"#f3f4f6"};color:${v.voto==="Aprovado"?"#166534":v.voto==="Reprovado"?"#991b1b":"#374151"}">${v.voto}</span></td><td style="padding:8px;border:1px solid #ddd">${v.ts||"—"}</td></tr>`).join("");
+    w.document.write(`<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"/><title>Relatorio</title><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;padding:30px;font-size:13px}h2{color:#1e3a5f;margin:20px 0 8px;border-bottom:2px solid #1d4ed8;padding-bottom:4px}table{width:100%;border-collapse:collapse;margin-top:8px}th{background:#1e3a5f;color:#fff;padding:10px;font-size:11px}tr:nth-child(even){background:#f9fafb}.no-print{position:fixed;bottom:20px;right:20px}@media print{.no-print{display:none}}</style></head><body>
+<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;padding-bottom:16px;border-bottom:3px solid #1e3a5f">
+<div><div style="display:flex;align-items:center;gap:12px"><span style="font-size:32px">🗳️</span><div><h1 style="font-size:22px;color:#1e3a5f">Relatorio de Assembleia</h1><p style="color:#6b7280">${cond?.nome||""}</p></div></div>
+<div style="margin-top:10px;font-size:13px"><p>Inicio: ${fmtDate(vot?.inicioTs)}</p><p>Encerramento: ${fmtDate(vot?.fimTs)}</p><p>Relatorio gerado: ${hoje}</p></div></div></div>
+<h2>📋 Pauta</h2><div style="background:#eff6ff;border-radius:8px;padding:14px;margin-bottom:16px"><p style="font-size:16px;font-weight:700;color:#1e3a5f">${enq?.tema||""}</p>${enq?.descricao?`<p style="margin-top:4px">${enq.descricao}</p>`:""}</div>
 <h2>🏆 Resultado Final</h2>
-<div class="resultado-box">
-  <p style="font-size:12px;font-weight:700;text-transform:uppercase;margin-bottom:6px;color:${ven==="APROVADO"?"#166534":ven==="REPROVADO"?"#991b1b":"#374151"}">Resultado da Votacao</p>
-  <p class="resultado-txt">${ven==="APROVADO"?"✅":ven==="REPROVADO"?"❌":"⚖️"} ${ven}</p>
+<div style="border:3px solid ${ven==="APROVADO"?"#166534":ven==="REPROVADO"?"#991b1b":"#374151"};border-radius:12px;padding:16px;text-align:center;margin-bottom:16px;background:${ven==="APROVADO"?"#dcfce7":ven==="REPROVADO"?"#fee2e2":"#f3f4f6"}">
+<p style="font-size:30px;font-weight:700;color:${ven==="APROVADO"?"#166534":ven==="REPROVADO"?"#991b1b":"#374151"}">${ven==="APROVADO"?"✅":ven==="REPROVADO"?"❌":"⚖️"} ${ven}</p></div>
+<h2>📊 Apuracao</h2>
+<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px">
+${[["Total",total,"#1e3a5f"],["Aprovados",ap,"#166534"],["Reprovados",rp,"#991b1b"],["Abstencoes",ab,"#374151"]].map(([l,v,c])=>`<div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:12px;text-align:center"><div style="font-size:26px;font-weight:700;color:${c}">${v}</div><div style="font-size:11px;color:#6b7280">${l} (${pct(v,total)}%)</div></div>`).join("")}
 </div>
-
-<h2>📊 Apuracao dos Votos</h2>
-<div class="grid" style="grid-template-columns:repeat(4,1fr)">
-  <div class="metric"><div class="metric-val">${total}</div><div class="metric-lbl">Total de votos</div></div>
-  <div class="metric"><div class="metric-val" style="color:#166534">${ap}</div><div class="metric-lbl">Aprovados (${pct(ap,total)}%)</div></div>
-  <div class="metric"><div class="metric-val" style="color:#991b1b">${rp}</div><div class="metric-lbl">Reprovados (${pct(rp,total)}%)</div></div>
-  <div class="metric"><div class="metric-val" style="color:#374151">${ab}</div><div class="metric-lbl">Abstencoes (${pct(ab,total)}%)</div></div>
+<h2>📈 Quorum</h2>
+<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px">
+${[["Aptos",aptos],["Participaram",votaram],["Ausentes",aptos-votaram],["Quorum",pct(votaram,aptos)+"%"]].map(([l,v])=>`<div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:12px;text-align:center"><div style="font-size:26px;font-weight:700;color:#1e3a5f">${v}</div><div style="font-size:11px;color:#6b7280">${l}</div></div>`).join("")}
 </div>
-
-${total>0?`
-<div style="margin-bottom:16px">
-  <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px"><span style="color:#166534;font-weight:600">✅ Aprovado</span><span>${ap} votos · ${pct(ap,total)}%</span></div>
-  <div class="bar-wrap"><div class="bar" style="width:${pct(ap,total)}%;background:#15803d">${Number(pct(ap,total))>5?"<span style='color:#fff;font-size:11px;font-weight:700'>"+pct(ap,total)+"%</span>":""}</div></div>
-  <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px;margin-top:8px"><span style="color:#991b1b;font-weight:600">❌ Reprovado</span><span>${rp} votos · ${pct(rp,total)}%</span></div>
-  <div class="bar-wrap"><div class="bar" style="width:${pct(rp,total)}%;background:#b91c1c">${Number(pct(rp,total))>5?"<span style='color:#fff;font-size:11px;font-weight:700'>"+pct(rp,total)+"%</span>":""}</div></div>
-  <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px;margin-top:8px"><span style="color:#374151;font-weight:600">⚪ Abstencao</span><span>${ab} votos · ${pct(ab,total)}%</span></div>
-  <div class="bar-wrap"><div class="bar" style="width:${pct(ab,total)}%;background:#6b7280">${Number(pct(ab,total))>5?"<span style='color:#fff;font-size:11px;font-weight:700'>"+pct(ab,total)+"%</span>":""}</div></div>
+<h2>🗳️ Registro com Biometria</h2>
+<table><thead><tr><th>Foto</th><th>Unidade</th><th>Nome</th><th>CPF</th><th>Voto</th><th>Horario</th></tr></thead><tbody>${rows}</tbody></table>
+<div style="margin-top:40px;border-top:1px solid #ddd;padding-top:20px;display:flex;justify-content:space-around">
+${["Administradora","Sindico(a)","Testemunha"].map(r=>`<div style="text-align:center"><div style="border-top:1px solid #111;width:200px;margin:0 auto 6px"></div><p style="font-size:12px;font-weight:600">${r}</p></div>`).join("")}
 </div>
-`:""}
-
-<h2>📈 Quorum e Participacao</h2>
-<div class="grid">
-  <div class="metric"><div class="metric-val">${aptos}</div><div class="metric-lbl">Unidades aptas</div></div>
-  <div class="metric"><div class="metric-val">${votaram}</div><div class="metric-lbl">Participaram</div></div>
-  <div class="metric"><div class="metric-val">${ausentes}</div><div class="metric-lbl">Ausentes</div></div>
-  <div class="metric"><div class="metric-val">${pct(votaram,aptos)}%</div><div class="metric-lbl">Quorum atingido</div></div>
+<div class="no-print" style="display:flex;gap:10px">
+<button onclick="window.print()" style="background:#1d4ed8;color:#fff;border:none;padding:12px 20px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600">🖨️ Imprimir / Salvar PDF</button>
+<button onclick="window.close()" style="background:#6b7280;color:#fff;border:none;padding:12px 20px;border-radius:8px;cursor:pointer;font-size:14px">Fechar</button>
 </div>
-
-<h2>🗳️ Registro Detalhado de Votos com Biometria Facial</h2>
-${votos.length===0?`<p style="color:#9ca3af;text-align:center;padding:20px">Nenhum voto registrado.</p>`:`
-<table>
-  <thead>
-    <tr>
-      <th style="width:80px;text-align:center">Foto (Biometria)</th>
-      <th>Unidade</th>
-      <th>Nome</th>
-      <th>CPF</th>
-      <th style="text-align:center">Voto</th>
-      <th style="text-align:center">Procurador</th>
-      <th style="text-align:center">Biometria</th>
-      <th>Horario</th>
-    </tr>
-  </thead>
-  <tbody>${rows}</tbody>
-</table>
-`}
-
-<div class="assinatura">
-  <div class="assina-item">
-    <div class="assina-linha"></div>
-    <p style="font-size:12px;font-weight:600">Administradora</p>
-    <p style="font-size:11px;color:#6b7280">Responsavel pela assembleia</p>
-  </div>
-  <div class="assina-item">
-    <div class="assina-linha"></div>
-    <p style="font-size:12px;font-weight:600">Sindico(a)</p>
-    <p style="font-size:11px;color:#6b7280">${cond?.nome||""}</p>
-  </div>
-  <div class="assina-item">
-    <div class="assina-linha"></div>
-    <p style="font-size:12px;font-weight:600">Testemunha</p>
-    <p style="font-size:11px;color:#6b7280">Nome: ___________________</p>
-  </div>
-</div>
-
-<div style="margin-top:30px;text-align:center;font-size:11px;color:#9ca3af;border-top:1px solid #e5e7eb;padding-top:12px">
-  Relatorio gerado automaticamente pelo sistema Urna Digital · ${hoje}
-</div>
-
-<div class="no-print" style="position:fixed;bottom:20px;right:20px;display:flex;gap:10px">
-  <button onclick="window.print()" style="background:#1d4ed8;color:#fff;border:none;padding:12px 20px;border-radius:8px;font-size:14px;cursor:pointer;font-weight:600;box-shadow:0 4px 12px rgba(0,0,0,.2)">🖨️ Imprimir / Salvar PDF</button>
-  <button onclick="window.close()" style="background:#6b7280;color:#fff;border:none;padding:12px 20px;border-radius:8px;font-size:14px;cursor:pointer;font-weight:600">✕ Fechar</button>
-</div>
-</body>
-</html>`);
-    w.document.close();
-    setTimeout(()=>w.print(),1500);
+</body></html>`);w.document.close();setTimeout(()=>w.print(),1500);
   };
-
   return(
-    <div style={{display:"flex",flexDirection:"column",gap:14}}>
-      <div style={S.card}>
-        <h3 style={{fontWeight:700,marginBottom:8,color:"#1e3a5f"}}>📄 Relatorio Completo da Assembleia</h3>
-        <p style={{fontSize:13,color:"#6b7280",marginBottom:16}}>Gere um relatorio completo em PDF com todos os dados da votacao, biometria facial, resultados e espaco para assinaturas.</p>
-
-        {vot?.status!=="encerrada"&&(
-          <div style={{background:"#fef9c3",border:"1px solid #fde68a",borderRadius:8,padding:"10px 14px",marginBottom:14,fontSize:13,color:"#854d0e"}}>
-            ⚠️ Recomendamos gerar o relatorio apos encerrar a votacao para incluir todos os dados finais.
+    <div style={S.card}>
+      <h3 style={{fontWeight:700,marginBottom:8,color:"#1e3a5f"}}>📄 Relatorio PDF</h3>
+      <p style={{fontSize:13,color:"#6b7280",marginBottom:16}}>Gere um relatorio completo com todos os dados, biometria e espacos para assinaturas.</p>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10,marginBottom:16}}>
+        {[["Condominio",cond?.nome||"—"],["Pauta",enq?.tema||"—"],["Total votos",total],["Resultado",ven],["Quorum",pct(votaram,aptos)+"%"],["Com biometria",votos.filter(v=>v.foto).length+"/"+total]].map(([l,v])=>(
+          <div key={l} style={{background:"#f9fafb",borderRadius:8,padding:"10px 12px",border:"1px solid #e5e7eb"}}>
+            <p style={{fontSize:11,color:"#9ca3af",marginBottom:2}}>{l}</p><p style={{fontWeight:600,color:"#1e3a5f"}}>{v}</p>
           </div>
-        )}
-
-        <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10,marginBottom:16}}>
-          {[["Condominio",cond?.nome||"—"],["Pauta",enq?.tema||"—"],["Total de votos",total],["Resultado",ven],["Quorum",pct(votaram,aptos)+"%"],["Com biometria",votos.filter(v=>v.foto).length+" de "+total]].map(([l,v])=>(
-            <div key={l} style={{background:"#f9fafb",borderRadius:8,padding:"10px 12px",border:"1px solid #e5e7eb"}}>
-              <p style={{fontSize:11,color:"#9ca3af",marginBottom:2}}>{l}</p>
-              <p style={{fontWeight:600,color:"#1e3a5f",fontSize:14}}>{v}</p>
-            </div>
-          ))}
-        </div>
-
-        <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:10,padding:14,marginBottom:14}}>
-          <p style={{fontWeight:700,color:"#15803d",marginBottom:8,fontSize:14}}>✅ O relatorio incluira:</p>
-          <ul style={{paddingLeft:18,fontSize:13,color:"#374151",display:"flex",flexDirection:"column",gap:4}}>
-            <li>Dados da assembleia (condominio, pauta, data/hora)</li>
-            <li>Resultado final (APROVADO / REPROVADO / EMPATE)</li>
-            <li>Grafico de barras com percentuais de cada opcao</li>
-            <li>Quorum e participacao detalhados</li>
-            <li><strong>Fotos da biometria facial</strong> de cada votante</li>
-            <li>Tabela completa: nome, CPF, unidade, voto, horario</li>
-            <li>Identificacao de procuradores</li>
-            <li>Espaco para assinaturas (administradora, sindico, testemunha)</li>
-          </ul>
-        </div>
-
-        <button onClick={gerarPDF} style={{...S.btn("#1d4ed8"),fontSize:16,padding:"14px"}}>
-          📄 Gerar e Baixar Relatorio PDF
-        </button>
-        <p style={{textAlign:"center",fontSize:12,color:"#9ca3af",marginTop:8}}>
-          Abre uma nova aba com o relatorio. Use Ctrl+P (ou Cmd+P) para salvar como PDF.
-        </p>
+        ))}
       </div>
+      <button onClick={gerarPDF} style={{...S.btn("#1d4ed8"),fontSize:15,padding:"14px"}}>📄 Gerar e Baixar Relatorio PDF</button>
+      <p style={{textAlign:"center",fontSize:12,color:"#9ca3af",marginTop:8}}>Use Ctrl+P para salvar como PDF na nova aba.</p>
     </div>
   );
 }
 
-/* ══ RESULTADO ══ */
+/* ═══ RESULTADO ═══ */
 function Resultado({votos,enq,cond,lista,vot,onBack}){
   const ap=votos.filter(v=>v.voto==="Aprovado").length,rp=votos.filter(v=>v.voto==="Reprovado").length,ab=votos.filter(v=>v.voto==="Abstencao").length;
   const total=votos.length,aptos=lista.filter(m=>!m.inadimplente).length,votaram=new Set(votos.map(v=>v.unidade)).size;
@@ -722,47 +648,31 @@ function Resultado({votos,enq,cond,lista,vot,onBack}){
           <p style={{fontWeight:600,marginTop:4,color:"#1e3a5f"}}>{enq?.tema}</p>
           {dur&&<p style={{fontSize:12,color:"#9ca3af",marginTop:4}}>Duracao: {fmtT(dur)}</p>}
         </div>
-        <div style={{background:vBg,border:"1px solid "+vTx,borderRadius:14,padding:"20px 16px",textAlign:"center"}}>
+        <div style={{background:vBg,border:"1px solid "+vTx,borderRadius:14,padding:"20px",textAlign:"center"}}>
           <p style={{fontSize:12,fontWeight:700,color:vTx,textTransform:"uppercase",marginBottom:6}}>Resultado</p>
           <p style={{fontSize:38,fontWeight:700,color:vTx}}>{ven==="APROVADO"?"✅":ven==="REPROVADO"?"❌":"⚖️"} {ven}</p>
         </div>
         <div style={S.card}>
-          <h3 style={{fontWeight:700,marginBottom:14,textAlign:"center",color:"#1e3a5f"}}>Apuracao</h3>
           {[["✅ Aprovado",ap,"#15803d"],["❌ Reprovado",rp,"#b91c1c"],["⚪ Abstencao",ab,"#4b5563"]].map(([l,v,bg])=>(
             <div key={l} style={{marginBottom:14}}>
-              <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span style={{fontSize:14,fontWeight:600}}>{l}</span><span style={{fontSize:14,fontWeight:700,color:bg}}>{v} votos · {pct(v,total)}%</span></div>
-              <div style={{background:"#e5e7eb",borderRadius:99,height:20,overflow:"hidden"}}>
-                <div style={{width:pct(v,total)+"%",height:"100%",background:bg,borderRadius:99,display:"flex",alignItems:"center",justifyContent:"flex-end",paddingRight:v>0?8:0,transition:"width .7s"}}>
-                  {Number(pct(v,total))>5&&<span style={{color:"#fff",fontSize:12,fontWeight:700}}>{pct(v,total)}%</span>}
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span style={{fontSize:14,fontWeight:600}}>{l}</span><span style={{fontSize:14,fontWeight:700,color:bg}}>{v} · {pct(v,total)}%</span></div>
+              <div style={{background:"#e5e7eb",borderRadius:99,height:18,overflow:"hidden"}}>
+                <div style={{width:pct(v,total)+"%",height:"100%",background:bg,borderRadius:99,display:"flex",alignItems:"center",justifyContent:"flex-end",paddingRight:v>0?6:0,transition:"width .7s"}}>
+                  {Number(pct(v,total))>5&&<span style={{color:"#fff",fontSize:11,fontWeight:700}}>{pct(v,total)}%</span>}
                 </div>
               </div>
             </div>
           ))}
         </div>
         <div style={S.card}>
-          <h3 style={{fontWeight:700,marginBottom:14,textAlign:"center",color:"#1e3a5f"}}>Resumo</h3>
           <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10}}>
-            {[["Total votos",total],["Quorum",pct(votaram,aptos)+"%"],["Aptos",aptos],["Ausentes",aptos-votaram],["Aprovados",ap],["Reprovados",rp],["Abstencoes",ab],["Maioria",ap>rp?"Sim ✅":"Nao ❌"]].map(([l,v])=>(
-              <div key={l} style={{background:"#f9fafb",borderRadius:8,padding:"12px 10px",textAlign:"center",border:"1px solid #e5e7eb"}}>
+            {[["Total",total],["Quorum",pct(votaram,aptos)+"%"],["Aptos",aptos],["Ausentes",aptos-votaram],["Aprovados",ap],["Reprovados",rp],["Abstencoes",ab],["Maioria",ap>rp?"Sim ✅":"Nao ❌"]].map(([l,v])=>(
+              <div key={l} style={{background:"#f9fafb",borderRadius:8,padding:"12px",textAlign:"center",border:"1px solid #e5e7eb"}}>
                 <p style={{fontSize:20,fontWeight:700,color:"#1e3a5f",marginBottom:2}}>{v}</p><p style={{fontSize:11,color:"#6b7280"}}>{l}</p>
               </div>
             ))}
           </div>
         </div>
-        {votos.length>0&&(
-          <div style={S.card}>
-            <h3 style={{fontWeight:700,marginBottom:12,color:"#1e3a5f"}}>Detalhamento</h3>
-            {votos.map((v,i)=>(
-              <div key={v._key||i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderTop:i>0?"1px solid #f3f4f6":"none",gap:10}}>
-                <div style={{display:"flex",alignItems:"center",gap:10}}>
-                  {v.foto?<img src={v.foto} alt="bio" style={{width:36,height:36,borderRadius:6,objectFit:"cover",border:"1px solid #e5e7eb"}}/>:<div style={{width:36,height:36,borderRadius:6,background:"#f3f4f6",display:"flex",alignItems:"center",justifyContent:  "center",fontSize:18}}>👤</div>}
-                  <div><p style={{fontWeight:600,fontSize:14}}>Unid. {v.unidade} — {v.nome}</p>{v.procurador&&<p style={{fontSize:12,color:"#1d4ed8"}}>Procurador de {v.unidadeRep}</p>}<p style={{fontSize:11,color:"#9ca3af"}}>{v.ts}</p></div>
-                </div>
-                <span style={S.badge(v.voto==="Aprovado")}>{v.voto}</span>
-              </div>
-            ))}
-          </div>
-        )}
         <button onClick={onBack} style={S.btnO}>← Voltar</button>
       </div>
     </div>
